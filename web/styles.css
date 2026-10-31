@@ -234,8 +234,9 @@ button, input, select { font: inherit; color: inherit; }
 /* What a KPI's change compares with. */
 .kpi-basis { color: var(--text-3); font-size: 11px; margin-left: -4px; white-space: nowrap; flex: none; }
 /* Each part carries its dot in a gutter on its left and the gutter of a part that
-   starts a line is clipped, so a wrapped line neither starts nor ends on a dot. */
-.dotline { display: flex; flex-wrap: wrap; margin-left: -11px; clip-path: inset(0 0 0 11px); }
+   starts a line is clipped, so a wrapped line neither starts nor ends on a dot. Only
+   that gutter: text wider than the line and a tap target past it are left whole. */
+.dotline { display: flex; flex-wrap: wrap; margin-left: -11px; clip-path: inset(-8px -100vw -8px 11px); }
 .dotline .kn { position: relative; padding-left: 11px; min-width: 0; }
 .dotline .kn > i { position: absolute; left: 0; width: 11px; text-align: center; font-style: normal; }
 .head-value .dotline { justify-content: flex-end; }
