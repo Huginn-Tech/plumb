@@ -863,6 +863,8 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .lq-feed-ctl { display: flex; gap: 10px; align-items: center; }
 /* The line under the title holds its place while the chart is on the way. */
 .lq-chart .desc { min-height: 18px; }
+@media (min-width: 641px) and (max-width: 860px) { .lq-chart .desc { min-height: 35px; } }
+@media (min-width: 641px) and (max-width: 800px) { .keep-delta.k4 .kpi-label { min-height: 36px; } }
 /* A page turn brings the feed's head up under the sticky bar. */
 .lq-feed { scroll-margin-top: 72px; }
 /* Eleven columns on a tablet: closer together, and the year gives way as it does on phones. */
@@ -946,7 +948,18 @@ td.mkt-cell { position: relative; }
 /* By period: two lines beside rows of one, all on the row's middle. Each of its rows is two of its neighbours'. */
 #windows .t td { vertical-align: middle; }
 /* Keys and sources take more lines on narrow screens: their place is kept before they land. */
-@media (min-width: 1101px) and (max-width: 1260px) { .panel-head.vol-keys { min-height: 61px; } #main-chart { height: 291px; } }
+@media (min-width: 1101px) and (max-width: 1260px) {
+  .panel-head.vol-keys { min-height: 61px; }
+  #main-chart { height: 291px; }
+  .ov-main { grid-template-columns: minmax(0, 1fr) 410px; }
+  .ov-lists { grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr) minmax(0, 1fr); }
+  .ov-lists .t th, .ov-lists .t td { padding-left: 6px; padding-right: 6px; }
+  .ov-lists .t th:first-child, .ov-lists .t td:first-child { padding-left: 18px; }
+  .ov-lists .t th:last-child, .ov-lists .t td:last-child { padding-right: 18px; }
+}
+@media (min-width: 1101px) and (max-width: 1140px) { .keep-delta:not(.k4) .kpi-row { min-height: 54px; } }
+@media (min-width: 1000px) and (max-width: 1140px) { #fees-v, #liq-v, #taker-v { min-height: 71px; } }
+@media (min-width: 641px) and (max-width: 999px) { #liq-lg { min-height: 39px; } }
 @media (max-width: 860px) { .panel-head.vol-keys { min-height: 61px; } }
 /* Stacked, the list takes its height from its rows: it keeps it, however few trades the size filter leaves. */
 @media (max-width: 1100px) { #tape { min-height: 452px; } }

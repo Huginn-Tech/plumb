@@ -70,7 +70,7 @@ export function mount(el, { query, setQuery }) {
     </div>
     <div class="stack">
       <div class="kpis keep-delta" id="kpis">${skKpis(6, { spark: true, lines: 2 })}</div>
-      <div class="grid g-main">
+      <div class="grid g-main ov-main">
         <section class="panel">
           <div class="panel-head"><div><h2>Trading volume</h2><div class="desc">${keepDots('Traded notional by market · line: running total')}</div></div><div class="head-right vol-head">${chartTools('main-chart', 'volume')}<a class="meta" id="vol-link" href="${withWindow('/markets', vw)}">Market details →</a><span id="vwin" class="trend-win">${segSm('vw', WINDOWS, vw)}</span></div></div>
           <div class="panel-head vol-keys"><div class="legend toggles" id="legend"></div><span class="head-right"><span id="bucket"></span><span class="meta" id="chart-meta"></span></span></div>
@@ -94,7 +94,7 @@ export function mount(el, { query, setQuery }) {
         ${panel('taker', 'Taker flow', 'Volume bought (up) and sold (down) by takers per period; the line is net buying')}
       </div>
       <div class="section-label">Activity</div>
-      <div class="grid g-3 aligned">
+      <div class="grid g-3 aligned ov-lists">
         <section class="panel"><div class="panel-head"><h2>Latest liquidations</h2><a class="meta" id="liq-link" href="${liqPage(w)}">View all →</a></div><div class="panel-body flush" id="liqs">${skRows(LIST_ROWS, 38, 34)}</div></section>
         <section class="panel"><div class="panel-head"><h2>Wallet flows</h2><div id="flowview">${segSm('flowv', FLOW_VIEWS, flowView)}</div></div><div class="panel-body flush" id="flowlist">${skRows(LIST_ROWS, 38, 34)}</div></section>
         <section class="panel fill"><div class="panel-head"><h2>By period</h2><span class="meta">Exchange totals</span></div><div class="panel-body flush fill-table" id="windows">${skRows(4, stacked(1100) ? 48 : 76, 34, 48)}</div></section>
