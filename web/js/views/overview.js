@@ -3,7 +3,7 @@
 // flows, and market share.
 import { get, stream } from '../api.js';
 import { usd, usdShort, usdFull, compact, int, price, dpOf, pct, num, esc, signClass, timeOnly, dateTime, ago, duration } from '../format.js';
-import { kpi, keepDots, infoTip, seg, table, mkt, sideTag, addr, pnl, tradeAction, DASH, chartTools, skRows, skKpis, skChart, empty, assignColors, colorOf, hasColor, logo, ICON, OTHER_HEX, SLOT_HEX, mergeByAsset, hold, morph, panelError, keepTrying, fitRows } from '../ui.js';
+import { kpi, keepDots, infoTip, seg, table, mktLink, sideTag, addr, pnl, tradeAction, DASH, chartTools, skRows, skKpis, skChart, empty, assignColors, colorOf, hasColor, logo, ICON, OTHER_HEX, SLOT_HEX, mergeByAsset, hold, morph, panelError, keepTrying, fitRows } from '../ui.js';
 import { sparkline, stackedBars, lineChart, signedBars, twoSided, toggleSeries, dropZoom, COLORS, CUMULATIVE } from '../charts.js';
 
 const WINDOWS = [['24h', '24H'], ['7d', '7D'], ['30d', '30D'], ['all', 'All']];
@@ -24,6 +24,11 @@ const savedMinSize = () => { try { const v = localStorage.getItem('ps.minsize');
 const amt = (v, opts) => (num(v) === null ? DASH : `<span class="amt" title="${esc(usdFull(v))}">${usdShort(v, opts)}</span>`);
 // How long ago, with the exact time as its note.
 const when = ts => `<span class="muted" title="${esc(dateTime(ts))} UTC">${ago(ts)}</span>`;
+// Pages with a period of their own, opened on the one being read. Each has its own default.
+const withWindow = (path, win, home = DEFAULT_WINDOW) => (win === home ? path : `${path}?window=${win}`);
+const liqPage = win => withWindow('/liquidations', win, '30d');
+// A whole card is the link: the anchor sits on the figure, and stretches over the card in CSS.
+const cardLink = (name, value, href, page) => `<a class="kpi-link" href="${esc(href)}" aria-label="${esc(`${name} ${value}, open ${page}`)}">${value}</a>`;
 const logBug = e => { if (e?.status === undefined && e?.code === undefined) console.error(e); };
 
 export function mount(el, { query, setQuery }) {
@@ -57,13 +62,13 @@ export function mount(el, { query, setQuery }) {
         <div><h1><img class="hero-logo" src="/img/venues/perpl.png" alt="" width="26" height="26">Perpl <span class="hero-muted">Analytics</span></h1>
           <div class="sub">Live analytics for Perpl on Monad: markets, traders, liquidation risk and alerts, from every onchain trade.</div></div>
       </div>
-      <div class="hero-actions"><a class="btn primary" href="https://app.perpl.xyz" target="_blank" rel="noopener noreferrer">Trade on Perpl ${ICON.ext}</a><div id="win">${seg('window', WINDOWS, w)}</div></div>
+      <div class="hero-actions"><a class="btn primary" href="https://app.perpl.xyz" target="_blank" rel="noopener noreferrer">Trade on Perpl ${ICON.ext}</a><div class="ov-switch"><span id="win-for">Cards and Wallet flows</span><div id="win" role="group" aria-labelledby="win-for">${seg('window', WINDOWS, w)}</div></div></div>
     </div>
     <div class="stack">
       <div class="kpis keep-delta" id="kpis">${skKpis(6, { spark: true, lines: 2 })}</div>
       <div class="grid g-main">
         <section class="panel">
-          <div class="panel-head"><div><h2>Trading volume</h2><div class="desc">${keepDots('Traded notional by market · line: running total')}</div></div><div class="head-right vol-head">${chartTools('main-chart', 'volume')}<a class="meta" href="/markets">Market details →</a><span id="vwin" class="trend-win">${segSm('vw', WINDOWS, vw)}</span></div></div>
+          <div class="panel-head"><div><h2>Trading volume</h2><div class="desc">${keepDots('Traded notional by market · line: running total')}</div></div><div class="head-right vol-head">${chartTools('main-chart', 'volume')}<a class="meta" id="vol-link" href="${withWindow('/markets', vw)}">Market details →</a><span id="vwin" class="trend-win">${segSm('vw', WINDOWS, vw)}</span></div></div>
           <div class="panel-head vol-keys"><div class="legend toggles" id="legend"></div><span class="head-right"><span id="bucket"></span><span class="meta" id="chart-meta"></span></span></div>
           <div class="panel-body"><div class="chart" id="main-chart">${skChart()}</div></div>
         </section>
@@ -86,7 +91,7 @@ export function mount(el, { query, setQuery }) {
       </div>
       <div class="section-label">Activity</div>
       <div class="grid g-3 aligned">
-        <section class="panel"><div class="panel-head"><h2>Latest liquidations</h2><a class="meta" href="/liquidations">View all →</a></div><div class="panel-body flush" id="liqs">${skRows(LIST_ROWS, 38, 34)}</div></section>
+        <section class="panel"><div class="panel-head"><h2>Latest liquidations</h2><a class="meta" id="liq-link" href="${liqPage(w)}">View all →</a></div><div class="panel-body flush" id="liqs">${skRows(LIST_ROWS, 38, 34)}</div></section>
         <section class="panel"><div class="panel-head"><h2>Wallet flows</h2><div id="flowview">${segSm('flowv', FLOW_VIEWS, flowView)}</div></div><div class="panel-body flush" id="flowlist">${skRows(LIST_ROWS, 38, 34)}</div></section>
         <section class="panel fill"><div class="panel-head"><h2>By period</h2><span class="meta">Exchange totals</span></div><div class="panel-body flush fill-table" id="windows">${skRows(4, 76, 34, 38)}</div></section>
       </div>
@@ -191,13 +196,13 @@ export function mount(el, { query, setQuery }) {
     // Window totals compare with the window before; open interest and TVL show their change within the window.
     const vsPrev = { basis: `vs prev ${wl}`, basisTitle: `Compared with the previous ${wl}` }, within = { basis: `in ${wl}`, basisTitle: `Change over the last ${wl}` };
     morph($('kpis'), [
-      kpi({ label: `Volume · ${wl}`, value: usd(h.volume.value), delta: ch(h.volume.change_pct), ...vsPrev, note: `${int(data.markets.reduce((a, m) => a + (m.fills ?? 0), 0))} trades${partial}`, spark: 'sp-vol' }),
-      kpi({ label: 'Open interest', value: usd(c?.open_interest), delta: seriesChange('open_interest'), ...within, note: c ? `${int(c.positions)} open positions` : '', spark: 'sp-oi' }),
-      kpi({ label: 'TVL', value: usd(c?.tvl), delta: seriesChange('tvl'), ...within, note: `${amt(h.net_flow.value, { sign: true })} net flow · ${wl}`, spark: 'sp-tvl' }),
-      kpi({ label: `Fees · ${wl}`, value: usd(h.fees.value), delta: ch(h.fees.change_pct), ...vsPrev, note: h.protocol_revenue ? `<span data-tip="The protocol's share of fees (${usdFull(h.protocol_fees?.value)}) plus its share of liquidations (${usdFull(h.revenue?.protocol?.liquidations)})">${usdShort(h.protocol_revenue.value)} protocol revenue</span>` : '', spark: 'sp-fees' }),
-      act ? kpi({ label: 'Active traders · 30d', value: int(act.p.headline.traders.value), note: `${int(act.p.headline.new_accounts.value)} new accounts`, spark: 'sp-tr' })
-        : kpi({ label: `Active traders · ${wl}`, value: int(h.traders.value), delta: ch(h.traders.change_pct), ...vsPrev, note: `${int(h.new_accounts.value)} new accounts`, spark: 'sp-tr' }),
-      kpi({ label: `Liquidated · ${wl}`, value: usd(h.liquidated.value), delta: ch(h.liquidated.change_pct), ...vsPrev, invert: true, note: `${int(h.liquidations.value)} ${num(h.liquidations.value) === 1 ? 'liquidation' : 'liquidations'}`, spark: 'sp-liq' })
+      kpi({ label: `Volume · ${wl}`, value: cardLink('Volume', usd(h.volume.value), withWindow('/markets', win), 'Markets'), delta: ch(h.volume.change_pct), ...vsPrev, note: `${int(data.markets.reduce((a, m) => a + (m.fills ?? 0), 0))} trades${partial}`, spark: 'sp-vol' }),
+      kpi({ label: 'Open interest', value: cardLink('Open interest', usd(c?.open_interest), withWindow('/markets', win), 'Markets'), delta: seriesChange('open_interest'), ...within, note: c ? `${int(c.positions)} open positions` : '', spark: 'sp-oi' }),
+      kpi({ label: 'TVL', value: cardLink('TVL', usd(c?.tvl), '/status', 'Status'), delta: seriesChange('tvl'), ...within, note: `${amt(h.net_flow.value, { sign: true })} net flow · ${wl}`, spark: 'sp-tvl' }),
+      kpi({ label: `Fees · ${wl}`, value: cardLink('Fees', usd(h.fees.value), withWindow('/markets', win), 'Markets'), delta: ch(h.fees.change_pct), ...vsPrev, note: h.protocol_revenue ? `<span data-tip="The protocol's share of fees (${usdFull(h.protocol_fees?.value)}) plus its share of liquidations (${usdFull(h.revenue?.protocol?.liquidations)})">${usdShort(h.protocol_revenue.value)} protocol revenue</span>` : '', spark: 'sp-fees' }),
+      act ? kpi({ label: 'Active traders · 30d', value: cardLink('Active traders', int(act.p.headline.traders.value), withWindow('/traders', '30d'), 'Traders'), note: `${int(act.p.headline.new_accounts.value)} new accounts`, spark: 'sp-tr' })
+        : kpi({ label: `Active traders · ${wl}`, value: cardLink('Active traders', int(h.traders.value), withWindow('/traders', win), 'Traders'), delta: ch(h.traders.change_pct), ...vsPrev, note: `${int(h.new_accounts.value)} new accounts`, spark: 'sp-tr' }),
+      kpi({ label: `Liquidated · ${wl}`, value: cardLink('Liquidated', usd(h.liquidated.value), liqPage(win), 'Liquidations'), delta: ch(h.liquidated.change_pct), ...vsPrev, invert: true, note: `${int(h.liquidations.value)} ${num(h.liquidations.value) === 1 ? 'liquidation' : 'liquidations'}`, spark: 'sp-liq' })
     ].join(''));
     spark('sp-vol', pts.map(p => num(p.volume)));
     spark('sp-oi', pts.map(p => num(p.open_interest)));
@@ -357,7 +362,7 @@ export function mount(el, { query, setQuery }) {
     if (!rows.length) { if (tapeLoaded) morph($('tape'), empty(tape.length ? 'No trades of this size yet' : 'Waiting for trades')); return; }
     morph($('tape'), table({ id: 'tape', compact: true, columns: [
       { key: 't', label: 'Time (UTC)', render: r => `<span class="muted num">${timeOnly(r.ts)}</span>` },
-      { key: 'm', label: 'Market', render: r => mkt(r.market, r.symbol) },
+      { key: 'm', label: 'Market', cls: 'mkt-cell', render: r => mktLink(r.market, r.symbol) },
       { key: 's', label: 'Action', tip: 'What the taker did. Green: bought. Red: sold.', render: tradeAction },
       { key: 'p', label: 'Price', phone: false, n: true, render: r => price(r.price, dpOf(r.price)) },
       { key: 'v', label: 'Notional', n: true, render: r => amt(r.notional) }
@@ -366,7 +371,7 @@ export function mount(el, { query, setQuery }) {
   }
   function renderLiqs(l) {
     morph($('liqs'), l.rows.length ? table({ id: 'liqs', compact: true, columns: [
-      { key: 'm', label: 'Market', render: r => mkt(r.market, r.symbol) },
+      { key: 'm', label: 'Market', cls: 'mkt-cell', render: r => mktLink(r.market, r.symbol) },
       { key: 's', label: 'Side', render: r => sideTag(r.side) },
       { key: 'v', label: 'Notional', n: true, render: r => amt(r.notional) },
       { key: 't', label: 'Time', n: true, render: r => when(r.ts) }
@@ -399,11 +404,11 @@ export function mount(el, { query, setQuery }) {
     const ws = data.windows;
     const rows = [['24h', '24 hours'], ['7d', '7 days'], ['30d', '30 days'], ['all', 'All-time']].map(([k, label]) => ({ k, label, ...(ws[k] ?? {}) }));
     morph($('windows'), table({ id: 'win', compact: true, columns: [
-      { key: 'label', label: 'Period', render: r => `${r.label}${r.k === 'all' && backfill && !backfill.complete ? ' <span class="tag warn" title="History is still being indexed">partial</span>' : ''}${r.k === dataWin ? ' <span class="tag accent">shown</span>' : ''}<div class="sub">${int(r.trades)} trades</div>` },
+      { key: 'label', label: 'Period', render: r => `<a href="${withWindow('/', r.k)}">${r.label}</a>${r.k === 'all' && backfill && !backfill.complete ? ' <span class="tag warn" title="History is still being indexed">partial</span>' : ''}${r.k === dataWin ? ' <span class="tag accent">shown</span>' : ''}<div class="sub">${int(r.trades)} trades</div>` },
       { key: 'volume', label: 'Volume', n: true, render: r => amt(r.volume) },
       { key: 'fees', label: 'Fees', n: true, render: r => amt(r.fees) },
       { key: 'traders', label: 'Traders', n: true, render: r => int(r.traders) }
-    ], rows, rowAttrs: r => `class="link" data-href="/?window=${r.k}"` }));
+    ], rows, rowAttrs: r => `class="link" data-action="win" data-v="${r.k}"` }));
   }
 
   // Market-share context from DefiLlama's open-interest overview (external, labelled as such).
@@ -491,13 +496,22 @@ export function mount(el, { query, setQuery }) {
       if (name === 'min') { minSize = v; try { localStorage.setItem('ps.minsize', v); } catch { /* storage unavailable */ } morph($('minsize'), segSm('min', MIN_SIZES, minSize)); renderTape(); }
       if (name === 'flowv') { flowView = v; morph($('flowview'), segSm('flowv', FLOW_VIEWS, flowView)); renderFlows(); }
       if (name === 'bucket') { bucket = v; renderBucket(); pressVolume(); return; }
-      if (name === 'vw') { vw = v; bucket = null; morph($('vwin'), segSm('vw', WINDOWS, vw)); renderBucket(); pressVolume(); return; }
+      if (name === 'vw') { vw = v; bucket = null; morph($('vwin'), segSm('vw', WINDOWS, vw)); $('vol-link').setAttribute('href', withWindow('/markets', vw)); renderBucket(); pressVolume(); return; }
       if (name === 'feesv') { feeView = v; morph($('fees-mode'), segSm('feesv', FEE_VIEWS, feeView)); renderFees(); }
     },
-    onAction(a, t) { if (a === 'toggle') { const name = t.dataset.name, hide = !hidden.has(name); if (hide) hidden.add(name); else hidden.delete(name); t.classList.toggle('off', hide); toggleSeries($('main-chart'), name); } },
+    onAction(a, t, event) {
+      if (a === 'toggle') { const name = t.dataset.name, hide = !hidden.has(name); if (hide) hidden.add(name); else hidden.delete(name); t.classList.toggle('off', hide); toggleSeries($('main-chart'), name); }
+      if (a === 'win') {
+        // A plain press changes the period where the reader is; a new tab stays a link's job.
+        if (event.ctrlKey || event.metaKey || event.shiftKey) { if (!event.target.closest('a')) window.open(withWindow('/', t.dataset.v), '_blank', 'noopener'); return; }
+        event.preventDefault();
+        setQuery({ window: t.dataset.v === DEFAULT_WINDOW ? null : t.dataset.v });
+      }
+    },
     update(q) {
       const nw = windowOf(q); if (nw === w) return;
       w = nw; morph($('win'), seg('window', WINDOWS, w));
+      $('liq-link').setAttribute('href', liqPage(w));
       for (const id of ['kpis', 'windows', 'flowlist']) dim(id);
       startMain(); startFlows();
     },
