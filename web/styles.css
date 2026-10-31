@@ -1196,6 +1196,117 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .alerts-grid { padding: 18px; }
 .alerts-copy h2 { font-size: 24px; font-weight: 400; letter-spacing: -0.02em; }
 .alerts-f b { font-weight: 500; }
+
+/* Type scale. */
+.pipeline .stage .v { font-size: 20px; }
+.alerts-copy h2 { font-size: 28px; }
+/* Risk: every card keeps room for a two-line note, so the row has one height. */
+/* A subgrid card ignores min-height, so the note's track holds the room. */
+.rk-kpis .kpi-row { min-height: 36.8px; }
+/* The labels are fixed text, so where each row's label wraps is known: the skeleton matches it. */
+@media (max-width: 397px) { .rk-kpis .kpi:nth-child(n + 5) .kpi-label { min-height: 36px; } }
+@media (max-width: 377px) { .rk-kpis .kpi:nth-child(n + 3) .kpi-label { min-height: 36px; } }
+@media (max-width: 367px) { .rk-kpis .kpi-label { min-height: 36px; } }
+.rk-block:empty::before { content: '\00a0'; }
+/* The empty line holds the width of its text, so the head wraps as it will with data. */
+.rk-block:empty { min-width: min(437px, 100%); }
+@media (max-width: 484px) { .rk-block:empty { min-height: 40.6px; } }
+/* Stress test. A press changes figures, never heights: the stats fill a fixed block
+   with no blank band, and the hits keep eight rows' room with a short list at the top. */
+.rk-range { display: flex; align-items: center; gap: 14px; }
+.rk-range > span { flex: none; width: 48px; }
+.rk-range > span:last-child { text-align: right; }
+.rk-move { margin-top: 6px; min-height: 19px; text-align: center; font-size: 13px; }
+.rk-move b { color: var(--text); font-weight: 500; }
+.rk-price { width: 64px; }
+.rk-stress { scroll-margin-top: 72px; }
+.rk-stress .range:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px; border-radius: 4px; }
+.rk-stress .stat-grid { flex: 1; grid-auto-rows: 1fr; }
+.rk-stress .stat { align-items: center; }
+#stress { min-height: 168px; }
+#stress > .sk-box { flex: 1; height: auto !important; } /* fills what the card reserves, at every width */
+/* The legend stacks at a fixed width, so the ladder's line never wraps and both cards keep their height. */
+@media (min-width: 641px) { .rk-ladder .legend.dots { flex: none; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 36.8px; } }
+@media (max-width: 640px) { .rk-ladder .legend.dots { flex: 0 0 100%; min-height: 17.4px; } }
+#ladder-lg:empty { display: flex; }
+#hit { display: flex; flex-direction: column; min-height: 338px; }
+#hit > .empty-state { margin: auto 0; }
+/* Fixed columns: dragging the slider changes the figures, not where they sit. */
+@media (min-width: 1181px) {
+  #hit .t { table-layout: fixed; }
+  #hit .t th:nth-child(1) { width: 26%; }
+  #hit .t th:nth-child(2) { width: 12%; }
+}
+#hit-meta:empty::before { content: '\00a0'; }
+/* Whole rows in the market list, nine of them. */
+.rk-stress .mpick-list { max-height: 319px; } /* nine rows of 35 and the top padding: ends between two rows */
+.rk-stress .mpick-list button { height: 33px; }
+@media (max-width: 860px) { .rk-stress { scroll-margin-top: 112px; } }
+@media (max-width: 640px) { #stress { min-height: 336px; } }
+/* By market: under the width that holds the labels on one line, a head wraps before a row scrolls. */
+@media (max-width: 1180px) {
+  #table .t th { white-space: normal; line-height: 15px; }
+  #table .t th, #table .t td { padding-left: 8px; padding-right: 8px; }
+  #table .t th:first-child, #table .t td:first-child { padding-left: 18px; }
+  #table .t th:last-child, #table .t td:last-child { padding-right: 18px; }
+}
+@media (max-width: 640px) {
+  #table .t th:first-child, #table .t td:first-child { padding-left: 16px; }
+  #table .t tr > :nth-last-child(1 of :not(.hide-sm)) { padding-right: 16px; }
+}
+
+/* Status. The result line, in the head of Pipeline. */
+.st-result { display: inline-flex; align-items: center; gap: 8px; min-height: 17.4px; }
+.st-result b { color: var(--text); font-weight: 500; }
+.st-result .status-dot { flex: none; }
+.pipeline > .sk-box { grid-column: 1 / -1; }
+/* Skeleton heights: the final layout measured at each width, in one table. */
+.st-page { --sk-pipe: 140.6px; --sk-checks: 167.4px; --sk-dec: 167.4px; --sk-int: 805.1px; }
+@media (max-width: 1220px) { .st-page { --sk-checks: 182.1px; --sk-dec: 182.1px; } }
+@media (max-width: 1170px) { .st-page { --sk-pipe: 158px; } }
+@media (max-width: 999px) { .st-page { --sk-pipe: 175.3px; --sk-checks: 125.5px; --sk-dec: 167.4px; } }
+@media (max-width: 965px) { .st-page { --sk-int: 824px; } }
+@media (max-width: 900px) { .st-page { --sk-pipe: 292.1px; } }
+@media (max-width: 640px) { .st-page { --sk-checks: 191.1px; --sk-dec: 254.8px; } }
+@media (max-width: 590px) { .st-page { --sk-pipe: 326.9px; --sk-int: 842.8px; } }
+@media (max-width: 510px) { .st-page { --sk-pipe: 344.3px; --sk-int: 870.2px; } }
+@media (max-width: 480px) { .st-page { --sk-checks: 247.6px; --sk-int: 915px; } }
+@media (max-width: 392px) { .st-page { --sk-pipe: 379.1px; --sk-int: 933.8px; } }
+@media (max-width: 387px) { .st-page { --sk-pipe: 396.5px; --sk-int: 951.2px; } }
+@media (max-width: 480px) { #decoder-meta { min-height: 34.8px; } } /* two lines once the logs count lands */
+#pipeline > .sk-box { height: var(--sk-pipe) !important; }
+#checks > .sk-box { flex: 1 0 auto; height: var(--sk-checks) !important; }
+#decoder > .sk-box { flex: 1 0 auto; height: var(--sk-dec) !important; }
+#integrity > .sk-box { height: var(--sk-int) !important; }
+.st-method { font-size: 13px; }
+/* Definitions: two columns keep a line near 100 characters; an entry stays whole. */
+.doc { padding-bottom: 2px; }
+.doc p { margin: 0; }
+.doc h3 { margin: 0 0 6px; }
+.doc-item { padding-bottom: 16px; break-inside: avoid; }
+@media (min-width: 1000px) { .doc { columns: 2; column-gap: 36px; } }
+
+/* Alerts. One slot under the features for the button, the note or the failure. */
+.alerts-cta { min-height: 36px; }
+@media (max-width: 494px) { .alerts-cta { min-height: 65.4px; align-content: flex-start; } } /* the note wraps under the button */
+.alerts-cta .panel-error { justify-content: flex-start; min-height: 36px !important; padding: 0; text-align: left; }
+.al-wait { width: 160px; height: 36px; }
+.al-watch .t td:last-child { min-width: 112px; }
+/* The panel head names the bell; the button keeps its label for a pointer and a screen reader. */
+@media (max-width: 1180px) {
+  .al-watch .t th { white-space: normal; line-height: 15px; }
+  .al-watch .t th, .al-watch .t td { padding-left: 8px; padding-right: 8px; }
+  .al-watch .t th:first-child, .al-watch .t td:first-child { padding-left: 18px; }
+  .al-watch .t th:last-child, .al-watch .t td:last-child { padding-right: 18px; }
+}
+@media (max-width: 860px) {
+  .al-bell span { display: none; }
+  .al-watch .t td:last-child { min-width: 0; }
+}
+@media (max-width: 640px) {
+  .al-watch .t th:first-child, .al-watch .t td:first-child { padding-left: 16px; }
+  .al-watch .t th:last-child, .al-watch .t td:last-child { padding-right: 16px; }
+}
 /* ========== end page: risk ========== */
 
 /* ========== page: overview (overview.js) ========== */
