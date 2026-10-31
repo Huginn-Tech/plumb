@@ -247,7 +247,7 @@ if (!CSS.supports('animation-timeline: scroll()')) {
 // --- hover notes ------------------------------------------------------------------------
 // Every title="" on the site shows in one styled note instead of the browser's
 // plain box: on first hover the attribute moves to data-tip, so the native one
-// never opens. An (i) also opens on tap, for touch screens.
+// never opens. An (i), a column head and a tag also open on tap, for touch screens.
 if (typeof document !== 'undefined') {
   document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('th[data-sort]')) { e.preventDefault(); e.target.click(); } }); // a sortable header works from the keyboard
   const pop = Object.assign(document.createElement('div'), { className: 'tip-pop', hidden: true });
@@ -257,7 +257,8 @@ if (typeof document !== 'undefined') {
   const place = el => {
     const r = el.getBoundingClientRect(), p = pop.getBoundingClientRect(), gap = 8;
     const above = r.top - p.height - gap >= 8;
-    const left = Math.min(window.innerWidth - p.width - 8, Math.max(8, r.left + r.width / 2 - p.width / 2));
+    // clientWidth, not innerWidth: the note stays clear of the scrollbar.
+    const left = Math.min(document.documentElement.clientWidth - p.width - 8, Math.max(8, r.left + r.width / 2 - p.width / 2));
     pop.style.transform = `translate(${Math.round(left)}px, ${Math.round(above ? r.top - p.height - gap : r.bottom + gap)}px)`;
   };
   const show = el => {
@@ -270,9 +271,13 @@ if (typeof document !== 'undefined') {
   document.addEventListener('mouseover', e => { const el = noted(e.target); if (el && el !== on) show(el); else if (!el && on) hide(); });
   document.addEventListener('mouseout', e => { if (!e.relatedTarget) hide(); });
   document.addEventListener('focusin', e => { const el = noted(e.target); if (el) show(el); });
-  document.addEventListener('focusout', hide);
-  // A tap on (i) toggles its note (the tap's own mouseover has just opened it); a tap elsewhere closes it.
-  document.addEventListener('click', e => { const el = e.target.closest?.('.info-tip'); if (el) { if (on === el && Date.now() - shownAt > 400) hide(); else show(el); } else if (on) hide(); });
+  // relatedTarget: a tap that re-renders what it hit drops focus to nothing, and must not close its note.
+  document.addEventListener('focusout', e => { if (e.relatedTarget) hide(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
+  // A tap on one of these toggles its note (the tap's own mouseover has just opened it);
+  // a tap anywhere but on the open note's element closes it.
+  const TAP = '.info-tip, th[title], th[data-tip], .tag[title], .tag[data-tip], .rank-pill, .co-pill';
+  document.addEventListener('click', e => { const el = e.target.closest?.(TAP); if (el) { if (on === el && Date.now() - shownAt > 400) hide(); else show(el); } else if (on && noted(e.target) !== on) hide(); });
   window.addEventListener('scroll', hide, true);
   window.addEventListener('popstate', hide);
 }
