@@ -116,8 +116,8 @@ export function kpi({ label, value, delta = undefined, invert = false, basis = n
 }
 // Moves to a page of the dashboard; the router in app.js answers the popstate.
 export const go = url => { history.pushState(null, '', url); dispatchEvent(new PopStateEvent('popstate')); };
-export const seg = (name, options, active) => `<div class="seg" role="group">${options.map(([v, label]) => `<button data-seg="${esc(name)}" data-v="${esc(v)}" class="${String(v) === String(active) ? 'on' : ''}">${esc(label)}</button>`).join('')}</div>`;
-export const tabs = (name, options, active) => `<div class="tabs" role="tablist">${options.map(([v, label]) => `<button role="tab" data-tab="${esc(name)}" data-v="${esc(v)}" class="${v === active ? 'on' : ''}">${esc(label)}</button>`).join('')}</div>`;
+export const seg = (name, options, active) => `<div class="seg" role="group">${options.map(([v, label]) => `<button data-seg="${esc(name)}" data-v="${esc(v)}" class="${String(v) === String(active) ? 'on' : ''}" aria-pressed="${String(v) === String(active)}">${esc(label)}</button>`).join('')}</div>`;
+export const tabs = (name, options, active) => `<div class="tabs" role="tablist">${options.map(([v, label]) => `<button role="tab" data-tab="${esc(name)}" data-v="${esc(v)}" class="${v === active ? 'on' : ''}" aria-selected="${v === active}">${esc(label)}</button>`).join('')}</div>`;
 export function ratio(long, short) {
   const l = num(long) ?? 0, s = num(short) ?? 0, t = l + s;
   if (!t) return DASH;
@@ -156,22 +156,26 @@ export const skChart = () => '<div class="panel-body"><div class="skeleton sk-bl
 export const empty = text => `<div class="empty-state">${esc(text)}</div>`;
 
 // Sortable table: columns [{ key, label, n: numeric, sort: value fn, render }]
-export function table({ id, columns, rows, sortKey = null, sortDir = 'desc', rowAttrs = () => '', compact = false, emptyText = 'No data' }) {
+// Numbers are right-aligned; center: true keeps a column on its middle (a figure
+// over a bar). focusKey names the column the rows are ranked by, when that is not
+// a sort of this table; it takes the tinted band (styles.css, .col-rank).
+export function table({ id, columns, rows, sortKey = null, focusKey = sortKey, sortDir = 'desc', rowAttrs = () => '', compact = false, emptyText = 'No data' }) {
   if (!rows.length) return empty(emptyText);
   let list = rows;
   const col = columns.find(c => c.key === sortKey);
   if (col?.sort) { list = [...rows].sort((a, b) => { const x = col.sort(a), y = col.sort(b); return (x > y ? 1 : x < y ? -1 : 0) * (sortDir === 'asc' ? 1 : -1); }); }
-  // A number with a second line under it (APR under a rate, "5 liq." under an
-  // amount) is centred, header included, so both lines and the header share
-  // one axis; single-line numbers stay right-aligned for easy comparison.
   // A row { group: 'label' } is a header over the rows after it.
   const cells = list.map((r, i) => (r.group ? null : columns.map(c => c.render(r, i))));
-  const stacked = columns.map((c, j) => Boolean(c.n) && cells.some(row => row && /class="sub[\s"]/.test(row[j])));
-  const align = (c, j) => (c.center || stacked[j] ? 'c' : c.n ? 'n' : '');
+  const align = c => (c.center ? 'c' : c.n ? 'n' : '');
   // A column marked phone: false hides on phones (styles.css, .hide-sm).
   const sm = c => (c.phone === false ? ' hide-sm' : '');
-  const head = columns.map((c, j) => `<th class="${align(c, j)}${sm(c)} ${c.sort ? 'sort' : ''} ${c.key === sortKey ? 'sorted' : ''}" ${c.sort ? `data-sort="${esc(id)}:${esc(c.key)}"` : ''}${c.tip ? ` title="${esc(c.tip)}"` : ''}>${esc(c.label)}${c.key === sortKey ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}</th>`).join('');
-  const body = list.map((r, i) => (r.group ? `<tr class="grp"><td colspan="${columns.length}">${r.group}</td></tr>` : `<tr ${rowAttrs(r, i)}>${columns.map((c, j) => `<td class="${align(c, j)}${sm(c)} ${c.cls ?? ''}">${cells[i][j]}</td>`).join('')}</tr>`)).join('');
+  // A header with a note shows it by its dotted label; a sortable one takes the
+  // keyboard itself (Enter or Space sorts, the note opens on focus).
+  const label = c => (c.tip ? `<span class="th-tip"${c.sort ? '' : ' tabindex="0"'}>${esc(c.label)}</span>` : esc(c.label));
+  const sorted = c => c.key === sortKey, rank = c => (c.key === focusKey ? ' col-rank' : '');
+  const order = sortDir === 'asc' ? ['ascending', '↑'] : ['descending', '↓'];
+  const head = columns.map(c => `<th class="${align(c)}${sm(c)} ${c.sort ? 'sort' : ''} ${sorted(c) ? 'sorted' : ''}${rank(c)}"${c.sort ? ` data-sort="${esc(id)}:${esc(c.key)}" tabindex="0"` : ''}${sorted(c) ? ` aria-sort="${order[0]}"` : ''}${c.tip ? ` title="${esc(c.tip)}"` : ''}>${label(c)}${sorted(c) ? `<span class="sort-ar" aria-hidden="true">${order[1]}</span>` : ''}</th>`).join('');
+  const body = list.map((r, i) => (r.group ? `<tr class="grp"><td colspan="${columns.length}">${r.group}</td></tr>` : `<tr ${rowAttrs(r, i)}>${columns.map((c, j) => `<td class="${align(c)}${sm(c)} ${c.cls ?? ''}${rank(c)}">${cells[i][j]}</td>`).join('')}</tr>`)).join('');
   return `<div class="table-wrap"><table class="t ${compact ? 'compact' : ''}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -245,6 +249,7 @@ if (!CSS.supports('animation-timeline: scroll()')) {
 // plain box: on first hover the attribute moves to data-tip, so the native one
 // never opens. An (i) also opens on tap, for touch screens.
 if (typeof document !== 'undefined') {
+  document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('th[data-sort]')) { e.preventDefault(); e.target.click(); } }); // a sortable header works from the keyboard
   const pop = Object.assign(document.createElement('div'), { className: 'tip-pop', hidden: true });
   pop.setAttribute('role', 'tooltip');
   document.body.append(pop);
