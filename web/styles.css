@@ -713,17 +713,26 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
    kept apart from the table's columns. On phones they scroll in one row. */
 .lb-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 24px; row-gap: 14px; padding-bottom: 18px; }
 .lb-head > .lb-rank { grid-column: 1 / -1; }
-.lb-rank { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-.lb-rank::-webkit-scrollbar { display: none; }
-@media (max-width: 1180px) { .lb-rank { mask-image: linear-gradient(90deg, #000 85%, transparent); } }
-.lb-rank .seg { flex: none; overflow: visible; }
+.lb-rank, .lb-period, .lb-sorts { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lb-period { flex: none; }
+.lb-sorts { overflow-x: auto; scrollbar-width: none; }
+.lb-sorts::-webkit-scrollbar { display: none; }
+.lb-sorts .seg { flex: none; overflow: visible; }
 .lb-label { font-size: 12px; color: var(--text-3); white-space: nowrap; flex: none; }
 .lb-label.group { margin-left: 8px; padding-left: 16px; border-left: 1px solid var(--line); }
+/* Too narrow for one row, the period keeps its own line and the rankings scroll under it. */
+@media (max-width: 1180px) {
+  .lb-rank { flex-wrap: wrap; row-gap: 10px; }
+  .lb-sorts { flex-basis: 100%; }
+  .lb-sorts .lb-label.group:first-child { margin-left: 0; padding-left: 0; border-left: 0; }
+  .lb-period > .lb-label, .lb-sorts > .lb-label:first-child { min-width: 48px; }
+}
+@media (max-width: 760px) { .lb-sorts { mask-image: linear-gradient(90deg, #000 85%, transparent); } }
 #board { scroll-margin-top: 72px; }
 @media (max-width: 860px) { #board { scroll-margin-top: 112px; } }
 @media (max-width: 640px) {
   .lb-head { grid-template-columns: minmax(0, 1fr); }
-  .lb-rank { margin-right: -18px; padding-right: 18px; }
+  .lb-sorts { margin-right: -18px; padding-right: 18px; }
   .lb-tools { width: 100%; }
   .lb-tools .lb-search { flex: 1; width: auto; min-width: 0; }
 }
@@ -737,6 +746,16 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .sm-list { max-height: calc(34px + 38px * 12); min-height: calc(34px + 38px * 12); }
 .sm-group { display: flex; align-items: center; gap: 8px; }
 .mv-verb { display: inline-block; min-width: 66px; }
+@media (max-width: 860px) { #sm-desc { min-height: 3lh; } }
+@media (max-width: 640px) {
+  #sm-desc { min-height: 4lh; }
+  .mv-verb { min-width: 52px; }
+  #moves .t th, #moves .t td { padding-left: 8px; padding-right: 8px; }
+  #moves .t th:first-child, #moves .t td:first-child { padding-left: 18px; }
+  #moves .t tr > :nth-last-child(1 of :not(.hide-sm)) { padding-right: 16px; }
+  .sm-ctl, .sm-group { width: 100%; }
+  .sm-group { justify-content: space-between; }
+}
 @media (min-width: 861px) {
   .panel-head:has(> .sm-ctl) > div:first-child { flex: 1 1 0; min-width: 0; }
   .sm-ctl { flex: none; flex-wrap: nowrap; gap: 16px; }
@@ -746,20 +765,42 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 #board #list { min-height: 914px; }
 #board .t td { height: 44px; padding-top: 4px; padding-bottom: 4px; color: var(--text-2); }
 #board .t td .addr a, #board .t td.col-rank { color: var(--text); }
-#board .sub.tags.inline { display: inline-flex; margin: 0 0 0 6px; align-items: center; gap: 4px; }
+#board .sub.tags.inline { display: inline-flex; margin: 0 0 0 4px; align-items: center; gap: 4px; }
 #board .sub.tags.inline .tag { height: 18px; line-height: 18px; margin: 0; }
-#board .addr { height: 20px; }
+#board .addr { height: 20px; gap: 3px; }
 #pager .num { min-width: 92px; text-align: center; }
 .ep-chips .ep-chip:first-child { min-width: 48px; }
-@media (min-width: 641px) and (max-width: 1360px) {
-  #board .t th, #board .t td { padding-left: 8px; padding-right: 8px; }
+/* Column widths by kind, each the widest figure or label seen plus padding, so a
+   press moves no column. Markets takes what is left. */
+#board { --p: 6px; }
+@media (min-width: 1440px) { #board { --p: 10px; } }
+@media (min-width: 641px) and (max-width: 1279px) { #board #list { min-height: 929px; } } /* room for the sideways scrollbar */
+@media (min-width: 641px) {
+  #board .t { table-layout: fixed; min-width: 1217px; }
+  #board .t th, #board .t td { padding-left: var(--p); padding-right: var(--p); }
   #board .t th:first-child, #board .t td:first-child { padding-left: 18px; }
-  #board .t th:last-child, #board .t td:last-child { padding-right: 18px; }
+  #board .t th:last-child, #board .t td:last-child { padding-right: 18px; overflow: hidden; }
+  #board col { width: calc(var(--w) + var(--p) * 2); }
+  #board col.c-rank { width: calc(34px + var(--p) + 18px); }
+  #board col.c-markets { width: auto; }
+  .c-addr { --w: 274px; } .c-pnl { --w: 57px; } .c-roi { --w: 74px; } .c-volume { --w: 53px; } .c-trades { --w: 59px; }
+  .c-maker { --w: 68px; } .c-fees { --w: 53px; } .c-liq { --w: 58px; }
+  .c-dep { --w: 53px; } .c-wd { --w: 69px; } .c-net { --w: 57px; }
+  .c-pos { --w: 50px; } .c-open { --w: 77px; } .c-upnl { --w: 59px; } .c-share { --w: 90px; }
 }
 @media (min-width: 1280px) {
   #board .table-wrap { overflow: visible; mask-image: none; animation: none; }
   #board .t th { top: 56px; z-index: 5; }
-  #board .t td:last-child { max-width: 0; width: 16%; overflow: hidden; text-overflow: ellipsis; }
+}
+/* Markets: three names and the count, four where there is room; the count always shows. */
+.mk { display: flex; gap: 4px; min-width: 0; }
+.mk-names { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mk-more { flex: none; }
+.mk-name4, .mk-more4 { display: none; }
+@media (min-width: 1340px) {
+  .mk-name4 { display: inline; }
+  .mk-more4 { display: block; }
+  .mk-more3 { display: none; }
 }
 @media (max-width: 640px) {
   #board #list { min-height: 1074px; }

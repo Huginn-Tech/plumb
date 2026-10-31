@@ -32,7 +32,7 @@ const periodChips = (ep, w) => {
   const chip = (v, label, on, tip) => `<button class="ep-chip${on ? ' on' : ''}" data-seg="epoch" data-v="${v}" aria-pressed="${on}" title="${esc(tip)}">${label}</button>`;
   return `<span class="ep-chips" role="group" aria-label="Period">${chip('', WINDOWS.find(([v]) => v === w)[1], !ep, 'The period picked at the top of the page')}${chip('this', 'This epoch', ep === EPOCHS.this, EPOCH_TIP)}${chip('last', 'Last epoch', ep === EPOCHS.last, EPOCH_TIP)}</span>`;
 };
-const rankBy = (by, ep, w) => `<span class="lb-label">Period</span>${periodChips(ep, w)}<span class="lb-label group">Rank by</span>${named(seg('by', SORTS.filter(([v]) => !FLOW_SORTS.has(v)), by), 'Rank by')}<span class="lb-label group">Flows</span>${named(seg('by', SORTS.filter(([v]) => FLOW_SORTS.has(v)), by), 'Rank by flows')}`;
+const rankBy = (by, ep, w) => `<div class="lb-period"><span class="lb-label">Period</span>${periodChips(ep, w)}</div><div class="lb-sorts"><span class="lb-label group">Rank by</span>${named(seg('by', SORTS.filter(([v]) => !FLOW_SORTS.has(v)), by), 'Rank by')}<span class="lb-label group">Flows</span>${named(seg('by', SORTS.filter(([v]) => FLOW_SORTS.has(v)), by), 'Rank by flows')}</div>`;
 const CO_TABS = [['size', 'By size'], ['pnl', 'By track record']];
 const SM_WINDOWS = [['7d', '7D'], ['30d', '30D'], ['all', 'All']];
 const SM_SIZES = [['100', '≥$100'], ['1000', '≥$1K'], ['10000', '≥$10K']];
@@ -42,7 +42,7 @@ const LIMIT = 20, SM_ROWS = 12;
 const RULES = { whale: '≥ $100K notional', dolphin: '$10K–100K notional', fish: '$1K–10K notional', shrimp: '< $1K notional', top: '≥ +$10K all-time', winner: '$0 to +$10K all-time', loser: '-$10K to $0 all-time', rekt: '≤ -$10K all-time' };
 const CO_SIZE_DESC = "Open positions now, grouped by each trader's total open notional · click a cohort for its traders";
 // The cohorts panel's height with its strip: four cards to a row, two, or one.
-const coHeight = () => (matchMedia('(max-width: 640px)').matches ? 1500 : matchMedia('(max-width: 1240px)').matches ? 560 : 360);
+const coHeight = () => (matchMedia('(max-width: 640px)').matches ? 1210 : matchMedia('(max-width: 1240px)').matches ? 629 : 351);
 // A table amount: the short form, with the exact figure as its note.
 const money = v => `<span title="${esc(usdFull(v))}">${usdShort(v)}</span>`;
 // A skeleton or a failed panel gives way whole; anything else is patched in place.
@@ -96,8 +96,13 @@ export function mount(el, { query, setQuery, keepQuery }) {
     { key: 'pos', label: 'Positions', tip: 'Open positions now, whatever the period', phone: false, n: true, render: r => (r.open_positions ? int(r.open_positions) : DASH) },
     { key: 'open', label: 'Open notional', tip: 'Open positions at the mark price, now, whatever the period', phone: false, n: true, render: r => (r.open_positions ? money(r.open_notional) : DASH) },
     { key: 'upnl', label: 'Unrealized', tip: 'Unrealized PnL of those positions now, whatever the period', phone: false, n: true, render: r => (r.open_positions ? pnlShort(r.unrealized_pnl) : DASH) },
-    { key: 'markets', label: 'Markets', tip: 'Markets traded in the period', phone: false, render: r => `<span class="muted" title="${esc(r.markets.join(' · '))}">${esc(r.markets.slice(0, 4).join(' · '))}${r.markets.length > 4 ? ` +${r.markets.length - 4}` : ''}</span>` }
+    { key: 'markets', label: 'Markets', tip: 'Markets traded in the period', phone: false, render: r => marketsCell(r.markets) }
   ];
+  function marketsCell(list) {
+    if (!list.length) return DASH;
+    const more = n => (list.length > n ? `+${list.length - n}` : '');
+    return `<span class="mk muted" title="${esc(list.join(' · '))}"><span class="mk-names">${esc(list.slice(0, 3).join(' · '))}${list[3] ? `<span class="mk-name4"> · ${esc(list[3])}</span>` : ''}</span><span class="mk-more mk-more3">${more(3)}</span><span class="mk-more mk-more4">${more(4)}</span></span>`;
+  }
   // Flow rankings swap the maker, fee and liquidation columns for the flows
   // themselves; an epoch shows each trader's share of the epoch's volume where the
   // open positions (now) would be.
@@ -161,7 +166,8 @@ export function mount(el, { query, setQuery, keepQuery }) {
     if (!data || !lbColumns) return;
     const f = filter.toLowerCase(), who = FLOW_SORTS.has(by) ? 'accounts' : 'traders';
     const rows = f ? data.rows.filter(r => String(r.address ?? '').toLowerCase().includes(f) || String(r.account) === f.replace(/^#/, '')) : data.rows;
-    put($('list'), table({ id: 'lb', columns: lbColumns, rows, focusKey: RANKED_COL[by], rowAttrs: r => `class="link" data-href="/wallet/${esc(r.address || r.account)}"`, emptyText: f ? 'Not on this page. Press Enter to open the wallet, if it is a full address or account ID.' : `No ${who} in this period` }));
+    const widths = `<colgroup>${lbColumns.map(c => `<col class="c-${c.key}${c.phone === false ? ' hide-sm' : ''}">`).join('')}</colgroup>`; // set in styles.css, so a press moves no column
+    put($('list'), table({ id: 'lb', columns: lbColumns, rows, focusKey: RANKED_COL[by], rowAttrs: r => `class="link" data-href="/wallet/${esc(r.address || r.account)}"`, emptyText: f ? 'Not on this page. Press Enter to open the wallet, if it is a full address or account ID.' : `No ${who} in this period` }).replace('<thead>', `${widths}<thead>`));
     // The count says what is on screen: a filter's matches on this page, or the page's place in the ranking.
     $('count').textContent = !data.total ? '' : f ? `${int(rows.length)} of ${int(data.rows.length)} on this page match` : `${int(data.total)} ${who} · showing ${int(page * LIMIT + 1)}–${int(page * LIMIT + data.rows.length)}`;
   }
