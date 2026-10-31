@@ -215,7 +215,7 @@ export function mount(el, { query, setQuery, keepQuery }) {
     const span = cut ? `the last ${duration(Date.now() / 1000 - oldest)} (the latest ${int(MOVE_FILLS)} fills)` : 'last 7 days';
     morph($('sm-desc'), dotted(`${int(m.leaders)} most profitable directional traders by net PnL (${wl}) · their moves, ${span}${m.excluded ? ` · ${int(m.excluded)} market-making and high-frequency accounts left out` : ''}`));
     put($('moves'), table({ id: 'moves', compact: true, emptyText: 'No moves by these traders in the last 7 days', columns: [
-      { key: 't', label: 'Time', render: r => `<span class="muted num" title="${esc(new Date(r.ts * 1000).toISOString().replace('T', ' ').slice(0, 19))} UTC">${ago(r.ts)}</span>` },
+      { key: 't', label: 'Time', render: r => `<span class="muted num" title="${esc(new Date(r.ts * 1000).toISOString().replace('T', ' ').slice(0, 19))} UTC">${ago(r.ts).replace(' ago', '<span class="mv-ago"> ago</span>')}</span>` },
       { key: 'a', label: 'Trader', phone: false, render: r => `<span class="sm-trader"><span class="rank-pill" title="Rank by net PnL among all traders, ${esc(wl)}">#${int(r.leader.rank)}</span>${addr(r.address, r.account)}</span>` },
       { key: 'x', label: 'Action', render: moveAction },
       { key: 'm', label: 'Market', render: r => mktLink(r.market, r.symbol) },

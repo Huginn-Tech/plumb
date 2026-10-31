@@ -749,10 +749,22 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .sm-list { max-height: calc(34px + 38px * 12); min-height: calc(34px + 38px * 12); }
 .sm-group { display: flex; align-items: center; gap: 8px; }
 .mv-verb { display: inline-block; min-width: 66px; }
+/* Columns keep their places when the list changes. */
+@media (min-width: 641px) {
+  #moves .t { table-layout: fixed; min-width: 900px; }
+  #moves .t th:nth-child(1) { width: 8.5%; }
+  #moves .t th:nth-child(2) { width: 24%; }
+  #moves .t th:nth-child(3) { width: 16.5%; }
+  #moves .t th:nth-child(4) { width: 9.5%; }
+  #moves .t th:nth-child(5) { width: 8%; }
+  #moves .t th:nth-child(6) { width: 8.5%; }
+  #moves .t th:nth-child(7) { width: 10.5%; }
+}
 @media (max-width: 860px) { #sm-desc { min-height: 3lh; } }
 @media (max-width: 640px) {
   #sm-desc { min-height: 4lh; }
-  .mv-verb { min-width: 52px; }
+  .mv-verb { min-width: 48px; }
+  .mv-ago { display: none; } /* the column is Time, and four columns must fit */
   #moves .t th, #moves .t td { padding-left: 8px; padding-right: 8px; }
   #moves .t th:first-child, #moves .t td:first-child { padding-left: 18px; }
   #moves .t tr > :nth-last-child(1 of :not(.hide-sm)) { padding-right: 16px; }
@@ -773,6 +785,7 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 #board .addr { height: 20px; gap: 3px; }
 #pager .num { min-width: 92px; text-align: center; }
 .ep-chips .ep-chip:first-child { min-width: 48px; }
+#by .ep-chip { font-size: 13px; font-weight: 500; padding: 5px 11px; } /* as the switches beside them; lit or not, the same width */
 /* Column widths by kind, each the widest figure or label seen plus padding, so a
    press moves no column. Markets takes what is left. */
 #board { --p: 6px; }
