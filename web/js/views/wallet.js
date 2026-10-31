@@ -144,7 +144,7 @@ export function mount(el, { params, query, setQuery, navigate }) {
   function frames() {
     if (tab !== 'overview') return `<section class="panel">${FRAME[tab]()}</section>`;
     const box = (title, h, phone) => `<section class="panel"><div class="panel-head"><h2>${title}</h2></div>${skBox(h, phone)}</section>`;
-    return `${box('By period', PERIODS_H[0], PERIODS_H[1] + 26)}<div class="grid g-main">${box('Net PnL', PERF_H[0], 416)}${box('Performance', PERF_H[0], PERF_H[1] + 26)}</div><div class="grid g-2">${box('Behaviour', INSIGHTS_H[0], INSIGHTS_H[1] + 26)}${box('By market', INSIGHTS_H[0], 348)}</div>`;
+    return `${box('By period', PERIODS_H[0], PERIODS_H[1] + 26)}<div class="grid g-main">${box('Net PnL', PERF_H[0], 441)}${box('Performance', PERF_H[0], PERF_H[1] + 26)}</div><div class="grid g-2">${box('Behaviour', INSIGHTS_H[0], INSIGHTS_H[1] + 26)}${box('By market', INSIGHTS_H[0], 348)}</div>`;
   }
   function render() {
     morph($('w-head'), head(data));
