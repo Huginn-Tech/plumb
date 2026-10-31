@@ -1,7 +1,7 @@
 // Small UI components rendered as HTML strings (every dynamic value goes
 // through esc) plus the watchlist store, market colour assignment and the
 // sideways-scrolling nav and tab strips.
-import { esc, short, num, usd, pct, bps, deltaHtml, signClass } from './format.js';
+import { esc, short, num, usd, usdShort, usdFull, pct, bps, deltaHtml, signClass } from './format.js';
 
 export const ICON = {
   cube: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l5.4 3.1v6.2L8 14.2l-5.4-3.1V4.9z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M2.6 4.9L8 8l5.4-3.1M8 8v6.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
@@ -65,6 +65,8 @@ export const logo = (id, symbol, size = 16) => {
 };
 
 // --- components ---------------------------------------------------------------------
+// An empty cell. Quieter than any word, so it never reads as a value.
+export const DASH = '<span class="dash">—</span>';
 // `link` makes the cell open the market page (for views that are not the market itself).
 export const mkt = (id, symbol, name = null, { link = false } = {}) => {
   const inner = `${logo(id, symbol)}${esc(symbol ?? `#${id}`)}${name ? ` <span class="nm">${esc(name)}</span>` : ''}`;
@@ -77,12 +79,13 @@ export function fundingTip(intervalSeconds) {
   const every = s > 0 ? `about every ${s >= 5400 ? `${(s / 3600).toFixed(1)} h` : `${Math.round(s / 60)} min`}` : 'on a fixed block schedule';
   return `Funding settles ${every}; shown as the rate for 8 hours and for a year (APR).`;
 }
-export const sideTag = side => { const s = String(side ?? '').toLowerCase(); return s === 'long' || s === 'short' ? `<span class="side ${s}">${s === 'long' ? 'LONG' : 'SHORT'}</span>` : '<span class="faint">—</span>'; };
-export function addr(address, account, { star = true } = {}) {
+export const sideTag = side => { const s = String(side ?? '').toLowerCase(); return s === 'long' || s === 'short' ? `<span class="side ${s}">${s === 'long' ? 'LONG' : 'SHORT'}</span>` : DASH; };
+// after: HTML printed after the icons, inside the same line (a trader's tags).
+export function addr(address, account, { star = true, after = '' } = {}) {
   const key = address || String(account ?? '');
-  if (!key) return '<span class="faint">—</span>';
+  if (!key) return DASH;
   const label = address ? short(address) : `#${esc(account)}`;
-  return `<span class="addr"><a href="/wallet/${esc(key)}" title="${esc(address || `Account ${account}`)}">${label}</a>${address ? `<button class="icon-btn" data-copy="${esc(address)}" title="Copy address">${ICON.copy}</button>` : ''}${star ? `<button class="icon-btn ${watch.has(key) ? 'on' : ''}" data-watch="${esc(key)}" title="Watch wallet">${watch.has(key) ? ICON.star : ICON.starOff}</button>` : ''}</span>`;
+  return `<span class="addr"><a href="/wallet/${esc(key)}" title="${esc(address || `Account ${account}`)}">${label}</a>${address ? `<button class="icon-btn" data-copy="${esc(address)}" title="Copy address">${ICON.copy}</button>` : ''}${star ? `<button class="icon-btn ${watch.has(key) ? 'on' : ''}" data-watch="${esc(key)}" title="Watch wallet">${watch.has(key) ? ICON.star : ICON.starOff}</button>` : ''}${after}</span>`;
 }
 // basis: what the delta compares with, shown after it ("vs prev", "in 24h").
 // A " · " in the label or the note keeps to the word before it, so a wrapped line never starts with it.
@@ -96,11 +99,13 @@ export const seg = (name, options, active) => `<div class="seg" role="group">${o
 export const tabs = (name, options, active) => `<div class="tabs" role="tablist">${options.map(([v, label]) => `<button role="tab" data-tab="${esc(name)}" data-v="${esc(v)}" class="${v === active ? 'on' : ''}">${esc(label)}</button>`).join('')}</div>`;
 export function ratio(long, short) {
   const l = num(long) ?? 0, s = num(short) ?? 0, t = l + s;
-  if (!t) return '<span class="faint">—</span>';
+  if (!t) return DASH;
   const lp = Math.round(l / t * 100);
   return `<div class="ratio-wrap"><div class="ratio"><i class="l" style="width:${lp}%"></i><i class="s" style="width:${100 - lp}%"></i></div><div class="lbl"><span>${lp}% L</span><span>${100 - lp}% S</span></div></div>`;
 }
-export const pnl = v => (num(v) === null ? '—' : `<span class="${signClass(v)}">${usd(v, { sign: true })}</span>`);
+export const pnl = v => (num(v) === null ? DASH : `<span class="${signClass(v)}">${usd(v, { sign: true })}</span>`);
+// A gain or loss in a table or note: the short form, with the exact amount as its note.
+export const pnlShort = v => (num(v) === null ? DASH : `<span class="${signClass(v)}" title="${esc(usdFull(v))}">${usdShort(v, { sign: true })}</span>`);
 // What the taker did, from the position event behind the fill. Colour
 // follows direction (buying is green); flips name the new side.
 const VERBS = { open: 'Open', increase: 'Add', decrease: 'Reduce', close: 'Close', invert: 'Flip to', deleverage: 'ADL', unwind: 'Unwind' };
@@ -114,17 +119,17 @@ export function tradeAction(r) {
 // Funding per 8h with its APR; a zero rate is shown quietly.
 export function fundingCell(f, { apr = true } = {}) {
   const rate = num(f?.rate_8h_pct);
-  if (rate === null) return '<span class="faint">—</span>';
+  if (rate === null) return DASH;
   if (rate === 0) return '<span class="faint" title="Zero rate: no funding payments this interval">0% · flat</span>';
   return `<span class="${signClass(rate, 4)}">${pct(rate, { digits: 4, sign: true })}</span>${apr ? `<div class="sub">${pct(f.apr_pct, { digits: 1, sign: true })} APR</div>` : ''}`;
 }
-export const pctCell = (v, sign = true) => (num(v) === null ? '<span class="faint">—</span>' : `<span class="${sign ? signClass(v) : ''}">${pct(v, { sign })}</span>`);
+export const pctCell = (v, sign = true) => (num(v) === null ? DASH : `<span class="${sign ? signClass(v) : ''}">${pct(v, { sign })}</span>`);
 // Whole basis points from 100 up, where a decimal adds nothing (+2405 bps, +25.2 bps).
-export const bpsCell = v => (num(v) === null ? '<span class="faint">—</span>' : `<span class="${signClass(v, 1)}">${bps(v, { sign: true, digits: Math.abs(num(v)) >= 100 ? 0 : 1 })}</span>`);
+export const bpsCell = v => (num(v) === null ? DASH : `<span class="${signClass(v, 1)}">${bps(v, { sign: true, digits: Math.abs(num(v)) >= 100 ? 0 : 1 })}</span>`);
 // PnL per $ traded means little on a few dollars of volume (a $100 gain on $10
 // traded reads as +100,000 bps), so under $1K it shows a dash.
 export const RATIO_MIN_VOLUME = 1000;
-export const ratioCell = (v, volume) => (num(volume) !== null && num(volume) >= RATIO_MIN_VOLUME ? bpsCell(v) : '<span class="faint" title="Shown from $1K of volume in the window">—</span>');
+export const ratioCell = (v, volume) => (num(volume) !== null && num(volume) >= RATIO_MIN_VOLUME ? bpsCell(v) : '<span class="dash" title="Shown from $1K of volume in the window">—</span>');
 export const skeleton = (rows = 6) => `<div class="panel-body">${Array.from({ length: rows }, (_, i) => `<div class="skeleton sk-line" style="width:${92 - (i % 3) * 14}%"></div>`).join('')}</div>`;
 export const skChart = () => '<div class="panel-body"><div class="skeleton sk-block"></div></div>';
 export const empty = text => `<div class="empty-state">${esc(text)}</div>`;
