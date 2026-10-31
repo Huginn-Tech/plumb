@@ -1,8 +1,8 @@
 // Liquidations: window totals, liquidated notional over time by side, and the
 // full feed (on-book liquidations and auto-deleveraging), live.
 import { get, stream } from '../api.js';
-import { usd, int, price, dpOf, esc, dateTime, ago, num, size } from '../format.js';
-import { kpi, seg, table, mktLink, sideTag, addr, pnl, skKpis, skRows, skChart, empty, ICON, colorOf, hasColor, OTHER_HEX, assignColors, chartTools, mergeByAsset, hold, morph, panelError, keepTrying, toast } from '../ui.js';
+import { usd, usdShort, usdFull, int, price, dpOf, esc, dateTime, ago, num, size } from '../format.js';
+import { kpi, keepDots, infoTip, seg, table, mktLink, sideTag, addr, pnlShort, DASH, skKpis, skRows, skChart, empty, ICON, colorOf, hasColor, OTHER_HEX, assignColors, chartTools, mergeByAsset, hold, morph, panelError, keepTrying, toast } from '../ui.js';
 import { stackedBars, dropZoom } from '../charts.js';
 
 const WINDOWS = [['24h', '24H'], ['7d', '7D'], ['30d', '30D'], ['all', 'All']];
@@ -13,6 +13,9 @@ const PAGE = 50;
 const windowOf = q => (WINDOWS.some(([v]) => v === q.get('window')) ? q.get('window') : DEFAULT_WINDOW);
 const pageOf = q => Math.max(0, (parseInt(q.get('page'), 10) || 1) - 1);
 // What the API says goes unprinted (panelError has its own words); a bug in this file does not.
+// A table or note amount: the short form, with the exact figure as its note.
+const amt = v => (num(v) === null ? DASH : `<span class="amt" title="${esc(usdFull(v))}">${usdShort(v)}</span>`);
+const exactPrice = v => (num(v) === null ? DASH : price(v, dpOf(v)));
 const logBug = e => { if (e?.status === undefined && e?.code === undefined) console.error(e); };
 
 export function mount(el, { query, setQuery, keepQuery }) {
@@ -24,7 +27,7 @@ export function mount(el, { query, setQuery, keepQuery }) {
   el.innerHTML = `
     <div class="page-head"><div><h1>Liquidations</h1><div class="sub">Forced closes from exchange events: liquidations on the order book and auto-deleveraging.</div></div><div id="win">${seg('window', WINDOWS, w)}</div></div>
     <div class="stack"><div class="kpis k4 keep-delta" id="kpis">${skKpis(4, { lines: 2 })}</div>
-      <section class="panel lq-chart"><div class="panel-head"><div><h2>Liquidated notional <span class="info-tip" title="Notional liquidated per period, by market, with the running total as a line. Excludes ADL and force closes.">i</span></h2><div class="desc" id="chart-desc"></div></div><div class="head-right"><div class="legend dots" id="legend"></div>${chartTools('chart', 'liquidations')}</div></div><div class="panel-body"><div class="chart" id="chart">${skChart()}</div></div></section>
+      <section class="panel lq-chart"><div class="panel-head"><div><h2>Liquidated notional${infoTip('Notional liquidated per period, by market, with the running total as a line. Excludes ADL and force closes.', 'Liquidated notional')}</h2><div class="desc" id="chart-desc"></div></div><div class="head-right"><div class="legend dots" id="legend"></div>${chartTools('chart', 'liquidations')}</div></div><div class="panel-body"><div class="chart" id="chart">${skChart()}</div></div></section>
       <section class="panel lq-feed"><div class="panel-head"><h2>Feed</h2><div class="lq-feed-ctl"><span class="meta" id="feed-meta" title="Includes ADL and force closes, so it can exceed the liquidation count above."></span><select id="mf" class="btn ghost" aria-label="Market filter"><option value="">All markets</option></select><a class="btn ghost" id="csv">${ICON.download} CSV</a></div></div><div class="panel-body flush" id="feed">${skRows(w === '24h' ? 8 : PAGE, 44, 34)}<div class="panel-foot pager"></div></div></section></div>`;
   const $ = s => el.querySelector(`#${s}`);
   // One hold per region, taken on a press and let go by the answer that lands.
@@ -45,21 +48,25 @@ export function mount(el, { query, setQuery, keepQuery }) {
     if (html !== filterList) { filterList = html; $('mf').innerHTML = html; }
     $('mf').value = market;
   }
+  // The biggest close opens its wallet, and its row is marked when it is on the page.
+  let largestOne = null;
+  const largestLink = r => { const who = r.address || r.account; return `${who ? `<a class="lq-largest" href="/wallet/${esc(who)}">` : '<span>'}${esc(r.symbol)} ${esc(r.side ?? '')}${who ? '</a>' : '</span>'}`; };
   function renderKpis(p, l, row) {
     const h = p.headline, wl = w === 'all' ? 'All-time' : w, asked = filters();
     // A market filter narrows the KPIs and the chart too, not only the feed. A
     // market with nothing in the window had no liquidations and no volume, not unknowns.
     const liquidated = row ? row.liquidated ?? 0 : h.liquidated.value, count = row ? row.liquidations ?? 0 : h.liquidations.value, volume = row ? row.volume ?? 0 : h.volume.value;
     const largest = l.largest ?? null; // the largest inside the window, from the server
+    largestOne = largest;
     // ADL and force closes: the headline counts them for all markets only, so
     // one market's are its feed events less its liquidations.
     adl = { key: asked, n: row ? Math.max(0, num(l.total) - (num(count) ?? 0)) : num(h.deleverages) };
     morph($('kpis'), [
-      kpi({ label: `Liquidated · ${wl}${row ? ` · ${row.symbol}` : ''}`, value: usd(liquidated), delta: row || w === 'all' || p.meta.previous_complete === false ? undefined : h.liquidated.change_pct, basis: 'vs prev', basisTitle: `Compared with the previous ${wl}`, invert: true, note: `${int(count)} ${num(count) === 1 ? 'liquidation' : 'liquidations'}` }),
+      kpi({ label: `Liquidated · ${wl}${row ? ` · ${row.symbol}` : ''}`, value: usd(liquidated), delta: row || w === 'all' || p.meta.previous_complete === false ? undefined : h.liquidated.change_pct, basis: `vs prev ${wl}`, basisTitle: `Compared with the previous ${wl}`, invert: true, note: `${int(count)} ${num(count) === 1 ? 'liquidation' : 'liquidations'}` }),
       // With no volume there is no share to take: the note says why.
-      kpi({ label: 'Share of volume', value: num(volume) ? `${(num(liquidated) / num(volume) * 100).toFixed(2)}%` : '—', note: num(volume) ? `of ${usd(volume)} traded` : `no trades in ${wl}` }),
+      kpi({ label: 'Liquidated / volume', value: num(volume) ? `${(num(liquidated) / num(volume) * 100).toFixed(2)}%` : '—', note: num(volume) ? `of ${amt(volume)} traded` : `no trades in ${wl}`, tip: 'Liquidated notional over volume traded in the period' }),
       kpi({ label: 'ADL, force closes', value: int(adl.n), note: 'closed by the protocol', tip: 'Closes forced by the protocol, full or partial: auto-deleveraging against a bankrupt position, or a force close at the mark price.' }),
-      kpi({ label: `Largest · ${wl}`, value: largest ? usd(largest.notional) : '—', note: largest ? `${esc(largest.symbol)} ${esc(largest.side ?? '')} · ${ago(largest.ts)}` : 'none in this window' })
+      kpi({ label: `Largest · ${wl}`, value: largest ? usd(largest.notional) : '—', note: largest ? `${largestLink(largest)} · ${ago(largest.ts)}` : 'none in this period' })
     ].join(''));
     shown.kpis = asked; undim('kpis');
   }
@@ -74,8 +81,8 @@ export function mount(el, { query, setQuery, keepQuery }) {
       if (rest.length) list.push({ name: 'Other', color: OTHER_HEX, data: s.times.map((_, i) => rest.reduce((a, m) => a + num(m.liquidated[i]), 0)) });
     }
     morph($('legend'), list.map(x => `<span><i style="background:${x.color}"></i>${esc(x.name)}</span>`).join('') + (list.length ? '<span><i style="background:#fff"></i>Cumulative</span>' : ''));
-    $('chart-desc').textContent = list.length ? `${BUCKETS[s.meta.bucket_seconds] ?? 'Per period'}${row ? '' : ' by market'} · line: running total` : '';
-    if (list.length) stackedBars(node, { times: s.times, series: list, bucketSeconds: s.meta.bucket_seconds, cumulative: true, zoom: true }); else node.innerHTML = empty('No liquidations in this window');
+    morph($('chart-desc'), list.length ? keepDots(`${BUCKETS[s.meta.bucket_seconds] ?? 'Per period'}${row ? '' : ' by market'} · line: running total`) : '');
+    if (list.length) stackedBars(node, { times: s.times, series: list, bucketSeconds: s.meta.bucket_seconds, cumulative: true, zoom: true }); else node.innerHTML = empty('No liquidations in this period');
     shown.chart = filters(); undim('chart');
   }
   function renderFeed(l) {
@@ -83,22 +90,23 @@ export function mount(el, { query, setQuery, keepQuery }) {
     // The feed has ADL and force closes too, so it runs longer than the liquidation
     // count above. A redraw under filters not yet loaded leaves the count out.
     const n = adl?.key === filters() ? adl.n : null;
-    $('feed-meta').textContent = `${int(total)} events${n ? ` · incl. ${int(n)} ADL and force close${n === 1 ? '' : 's'}` : ''} · ${w === 'all' ? 'All-time' : w}`;
+    morph($('feed-meta'), keepDots(`${int(total)} events${n ? ` · incl. ${int(n)} ADL and force close${n === 1 ? '' : 's'}` : ''} · ${w === 'all' ? 'All-time' : w}`));
+    const biggest = r => largestOne && r.tx === largestOne.tx && r.log_index === largestOne.log_index;
     const first = total ? page * PAGE + 1 : 0, last = page * PAGE + rows.length;
     const pager = pages > 1 ? `<div class="panel-foot pager"><span>${int(first)}–${int(last)} of ${int(total)}</span><span class="pager-ctl"><button class="btn ghost sm" data-action="prev" ${page === 0 ? 'disabled' : ''}>← Prev</button><span class="num">Page ${int(page + 1)} of ${int(pages)}</span><button class="btn ghost sm" data-action="next" ${page + 1 >= pages ? 'disabled' : ''}>Next →</button></span></div>` : '';
     morph($('feed'), table({ id: 'liq', columns: [
       { key: 't', label: 'Time (UTC)', render: r => { const d = dateTime(r.ts); return `<span class="muted num"><span class="yr">${d.slice(0, 5)}</span>${d.slice(5)}</span>`; } },
-      { key: 'm', label: 'Market', render: r => mktLink(r.market, r.symbol) },
-      { key: 'k', label: 'Type', phone: false, render: r => (r.kind === 'deleverage' ? (r.force_close ? '<span class="tag warn">Force close</span>' : '<span class="tag warn">ADL</span>') : `<span class="tag">${r.on_book ? 'Order book' : 'Liquidation'}</span>`) },
-      { key: 's', label: 'Position', render: r => sideTag(r.side) },
+      { key: 'm', label: 'Market', cls: 'mkt-cell', render: r => mktLink(r.market, r.symbol) },
+      { key: 'k', label: 'Type', phone: false, tip: 'Order book: filled on the book. ADL and Force close: closed by the protocol.', render: r => (r.kind === 'deleverage' ? (r.force_close ? '<span class="tag warn">Force close</span>' : '<span class="tag warn">ADL</span>') : `<span class="tag">${r.on_book ? 'Order book' : 'Liquidation'}</span>`) },
+      { key: 's', label: 'Side', render: r => sideTag(r.side) },
       { key: 'a', label: 'Trader', phone: false, render: r => addr(r.address, r.account) },
-      { key: 'sz', label: 'Size', phone: false, n: true, render: r => size(r.size) },
-      { key: 'p', label: 'Price', phone: false, n: true, render: r => price(r.price) },
-      { key: 'mk', label: 'Mark', phone: false, n: true, render: r => price(r.mark) },
-      { key: 'n', label: 'Notional', n: true, render: r => usd(r.notional) },
-      { key: 'pnl', label: 'Realized', phone: false, n: true, render: r => pnl(r.pnl) },
-      { key: 'rem', label: 'Remaining', phone: false, n: true, render: r => (num(r.remaining) ? size(r.remaining) : '<span class="faint">closed</span>') }
-    ], rows, rowAttrs: r => `class="link ${r.fresh ? 'flash' : ''}" data-href="/wallet/${esc(r.address || r.account)}"`, emptyText: 'No liquidations indexed in this range' }) + pager);
+      { key: 'sz', label: 'Size', phone: false, n: true, tip: 'Size liquidated, in units of the asset', render: r => size(r.size) },
+      { key: 'p', label: 'Fill price', phone: false, n: true, tip: 'Price the liquidation filled at', render: r => exactPrice(r.price) },
+      { key: 'mk', label: 'Mark price', phone: false, n: true, tip: 'Mark price at that moment', render: r => exactPrice(r.mark) },
+      { key: 'n', label: 'Notional', n: true, render: r => amt(r.notional) },
+      { key: 'pnl', label: 'Realized PnL', phone: false, n: true, tip: 'Loss or gain booked by the liquidation, before fees', render: r => pnlShort(r.pnl) },
+      { key: 'rem', label: 'Remaining', phone: false, n: true, tip: 'Size left open after a partial liquidation, in units of the asset', render: r => (num(r.remaining) ? size(r.remaining) : '<span class="faint">closed</span>') }
+    ], rows, rowAttrs: r => `class="link ${r.fresh ? 'flash' : ''} ${biggest(r) ? 'hl' : ''}" data-href="/wallet/${esc(r.address || r.account)}"`, emptyText: 'No liquidations in this period' }) + pager);
     shown.feed = filters(); undim('feed');
   }
   // The last answer asked for is the one drawn: seq for a load, feedSeq for all the feed's readers.

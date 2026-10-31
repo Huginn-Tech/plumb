@@ -861,6 +861,11 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 /* Only a message (no liquidations in the window): no reserved chart height. */
 .lq-chart .chart:has(> .empty-state) { height: auto; }
 .lq-feed-ctl { display: flex; gap: 10px; align-items: center; }
+/* The line under the title holds its place while the chart is on the way. */
+.lq-chart .desc { min-height: 18px; }
+/* A page turn brings the feed's head up under the sticky bar. */
+.lq-feed { scroll-margin-top: 72px; }
+.lq-largest { text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
 @media (max-width: 640px) {
   .lq-chart .head-right { flex: 1 1 100%; justify-content: space-between; }
   .lq-chart .legend.dots { justify-content: flex-start; margin-top: 0; }
@@ -920,8 +925,12 @@ td.mkt-cell { position: relative; }
 .mkt-cell a.mkt::after { content: ''; position: absolute; inset: 0; }
 /* Rows that pick a period look like the rows beside them until the pointer is on them. */
 #windows td a:hover { color: var(--accent); }
-/* The list is still whole rows when the speed note lands in the foot. */
-.ov-tape-foot { min-height: 45px; }
+/* Eight whole rows beside the chart: the chart is as tall as they need, and the foot
+   has the speed note's height before it lands, so the list never loses a row. */
+.ov-tape-foot { min-height: 47px; }
+@media (min-width: 1101px) { #main-chart { height: 312px; } }
+/* By period: two lines beside rows of one, all on the row's middle. Each of its rows is two of its neighbours'. */
+#windows .t td { vertical-align: middle; }
 /* A card that could not load keeps the look of the cards. */
 .kpis > .panel-error { background: var(--surface); border-radius: var(--radius); box-shadow: var(--card-edge); }
 /* ========== end page: overview ========== */
