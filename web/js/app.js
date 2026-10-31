@@ -298,7 +298,11 @@ async function poll() {
     showBanner(h.index?.backfill);
     setAlertsBot(h.alerts?.bot);
     polledBlock = h.index?.live?.to ?? polledBlock;
-  } catch (error) { if (error.status !== 429) apiDown = true; } // the rate limit is not an outage
+  } catch (error) {
+    // Neither the rate limit nor a failed check while blocks keep arriving is an outage.
+    const flowing = streamOpen && lastBlock && Date.now() - lastBlockAt <= DELAYED_MS;
+    if (error.status !== 429) apiDown = !flowing;
+  }
   renderLive();
   clearTimeout(pollTimer);
   pollTimer = setTimeout(poll, apiDown ? 5000 : streamLost() ? 15000 : 30000);
