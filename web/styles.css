@@ -930,9 +930,15 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 #ladder-lg:empty { display: flex; }
 #hit { display: flex; flex-direction: column; min-height: 338px; }
 #hit > .empty-state { margin: auto 0; }
+/* Fixed columns: dragging the slider changes the figures, not where they sit. */
+@media (min-width: 1181px) {
+  #hit .t { table-layout: fixed; }
+  #hit .t th:nth-child(1) { width: 26%; }
+  #hit .t th:nth-child(2) { width: 12%; }
+}
 #hit-meta:empty::before { content: '\00a0'; }
 /* Whole rows in the market list, nine of them. */
-.rk-stress .mpick-list { max-height: 321px; }
+.rk-stress .mpick-list { max-height: 319px; } /* nine rows of 35 and the top padding: ends between two rows */
 .rk-stress .mpick-list button { height: 33px; }
 @media (max-width: 860px) { .rk-stress { scroll-margin-top: 112px; } }
 @media (max-width: 640px) { #stress { min-height: 336px; } }

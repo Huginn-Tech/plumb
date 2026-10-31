@@ -148,6 +148,7 @@ export function mount(el, { query, setQuery, keepQuery }) {
     let r;
     try { r = await get(`markets/${id}/stress?move_pct=${at}`, { maxAge: 0 }); } catch (error) {
       if (!alive || seq !== stressSeq) return;
+      drawMove();
       // A refresh that fails leaves the figures; a pick that fails must not leave another market's.
       if (shown !== key) { panelError($('stress'), error.message, stress); panelError($('hit'), error.message, stress); morph($('hit-meta'), ''); }
       stressDone();

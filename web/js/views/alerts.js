@@ -16,6 +16,7 @@ const NO_WALLETS = 'No wallets yet. Star a wallet from the leaderboard, a feed o
 const amount = v => (num(v) === null ? DASH : `<span title="${esc(usdFull(v))}">${usdShort(v)}</span>`);
 // A 4xx names the wallet itself: it stays as it is. Anything else can pass.
 const lasting = e => e.status >= 400 && e.status < 500 && e.status !== 429;
+const unread = e => (e.code === 'ACCOUNT_NOT_FOUND' ? 'No account found for this wallet' : lasting(e) ? e.message : 'Could not read this wallet');
 
 export function mount(el, { navigate }) {
   // The bot's name comes with /health. Until that answers, nothing is known about it:
@@ -58,16 +59,11 @@ export function mount(el, { navigate }) {
   // The last answer per wallet: a refresh that fails keeps it, and only a wallet never
   // read shows its gap, with an amber dot.
   const last = new Map();
-  async function load({ fresh = false } = {}) {
-    const asked = ++seq, list = watch.list();
-    el.querySelector('[data-action="compare"]').disabled = !list.length;
-    if (!list.length) { morph($('list'), empty(NO_WALLETS)); return; }
-    const reads = await Promise.all(list.map(w => get(`wallets/${encodeURIComponent(w.key)}`, { maxAge: fresh ? 0 : 10000 }).then(d => { last.set(w.key, d); return { key: w.key, d }; }).catch(e => ({ key: w.key, d: last.get(w.key) ?? null, error: e }))));
-    if (!alive || asked !== seq) return;
-    const down = reads.find(r => r.error && !lasting(r.error))?.error;
-    if (down && reads.every(r => !r.d)) throw down; // nothing to show: the list says so, once
+  let shown = null;
+  const draw = reads => {
+    shown = reads;
     morph($('list'), table({ id: 'watch', columns: [
-      { key: 'a', label: 'Wallet', render: r => `<span class="addr"><a class="mono" href="/wallet/${esc(r.d?.account?.address ?? r.key)}">${esc(short(r.d?.account?.address ?? r.key))}</a><button class="icon-btn on" data-watch="${esc(r.key)}" title="Remove from watchlist">${ICON.star}</button>${r.d ? '' : `<span class="status-dot warn" title="${esc(lasting(r.error) ? r.error.message : 'Could not read this wallet')}"></span>`}</span>` },
+      { key: 'a', label: 'Wallet', render: r => `<span class="addr"><a class="mono" href="/wallet/${esc(r.d?.account?.address ?? r.key)}">${esc(short(r.d?.account?.address ?? r.key))}</a><button class="icon-btn on" data-watch="${esc(r.key)}" title="Remove from watchlist">${ICON.star}</button>${r.d ? '' : `<span class="status-dot warn" title="${esc(unread(r.error))}"></span>`}</span>` },
       { key: 'v', label: 'Account value', n: true, render: r => amount(r.d?.portfolio?.account_value) },
       { key: 'o', label: 'Open positions', phone: false, n: true, render: r => (r.d ? int(r.d.positions?.length ?? 0) : DASH) }, // a wallet that failed to load: unknown, not none
       { key: 'c', label: 'Liq. distance', n: true, tip: 'Mark price move that reaches the closest liquidation price among this wallet’s positions', render: r => { const d = r.d?.portfolio?.closest_liquidation?.distance_pct ?? null; return d === null ? DASH : `<span class="${d < 5 ? 'neg' : d < 15 ? 'warn-text' : 'muted'}">${pct(d, { digits: 1 })}</span>`; } },
@@ -76,6 +72,16 @@ export function mount(el, { navigate }) {
       { key: 'l', label: 'Last trade', phone: false, n: true, render: r => (r.d?.summary?.last_trade ? `<span class="muted" title="${esc(dateTime(r.d.summary.last_trade))} UTC">${ago(r.d.summary.last_trade)}</span>` : DASH) },
       { key: 't', label: '', n: true, render: r => { const link = alertsLink(r.d?.account?.address ?? r.key); return link ? `<a class="btn ghost sm al-bell" href="${esc(link)}" target="_blank" rel="noopener noreferrer" title="Watch this wallet in Telegram" aria-label="Alert me">${ICON.bell} <span>Alert me</span></a>` : ''; } }
     ], rows: reads, rowAttrs: r => `class="link" data-href="/wallet/${esc(r.d?.account?.address ?? r.key)}"` }));
+  };
+  async function load({ fresh = false } = {}) {
+    const asked = ++seq, list = watch.list();
+    el.querySelector('[data-action="compare"]').disabled = !list.length;
+    if (!list.length) { shown = null; morph($('list'), empty(NO_WALLETS)); return; }
+    const reads = await Promise.all(list.map(w => get(`wallets/${encodeURIComponent(w.key)}`, { maxAge: fresh ? 0 : 10000 }).then(d => { last.set(w.key, d); return { key: w.key, d }; }).catch(e => ({ key: w.key, d: last.get(w.key) ?? null, error: e }))));
+    if (!alive || asked !== seq) return;
+    const down = reads.find(r => r.error && !lasting(r.error))?.error;
+    if (down && reads.every(r => !r.d)) throw down; // nothing to show: the list says so, once
+    draw(reads);
     if (down) throw down; // drawn with what there is; the rest is asked for again
   }
   let stopList = () => {};
@@ -87,7 +93,7 @@ export function mount(el, { navigate }) {
   window.addEventListener('watchlist', onChange);
   renderBot();
   // The first answer that names the bot, or says there is none, redraws the card and the links.
-  alertsBotReady.then(() => { if (!alive) return; known = true; noAnswer = false; bot = alertsBotName(); renderBot(); showList(); });
+  alertsBotReady.then(() => { if (!alive) return; known = true; noAnswer = false; bot = alertsBotName(); renderBot(); if (shown) draw(shown); });
   const stopBot = known ? () => {} : keepTrying(askBot, { alive: () => alive, fail: () => { if (!known && !noAnswer) { noAnswer = true; renderBot(); } } });
   showList();
   return {

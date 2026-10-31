@@ -134,7 +134,8 @@ export function mount(el) {
     const asked = ++seq;
     const [h, v] = await Promise.allSettled([get('health', { maxAge: 0 }), get('validation', { maxAge: 0 })]);
     if (!alive || asked !== seq) return;
-    if (h.status === 'fulfilled') { health = h.value; drawPipeline(health); drawDecoder(health); } else if (!health) for (const id of ['pipeline', 'decoder']) panelError($(id), h.reason.message, load);
+    // With no new answer the last one is redrawn, so the age of the last block keeps climbing.
+    if (h.status === 'fulfilled') { health = h.value; drawPipeline(health); drawDecoder(health); } else if (health) drawPipeline(health); else for (const id of ['pipeline', 'decoder']) panelError($(id), h.reason.message, load);
     if (v.status === 'fulfilled') { validation = v.value; drawChecks(validation); drawIntegrity(validation); } else if (!validation) for (const id of ['checks', 'integrity']) panelError($(id), v.reason.message, load);
     drawResult(h.status === 'rejected' || v.status === 'rejected');
     if (!health && !validation) throw h.reason; // nothing on the page yet: keepTrying asks again
