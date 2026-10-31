@@ -71,19 +71,23 @@ export function keepQuery(patch) {
   shown = location.pathname + location.search;
 }
 
-// Back returns the reader to where they were. A page still filling in takes that
-// place once it is tall enough, unless the reader has moved first.
-const RESTORE_MS = 6000, MOVES = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
+// Back returns the reader to where they were. A page still filling in is held at that
+// place as it grows (scroll anchoring would carry the reader down with every section
+// that lands above), until it has settled. Any move by the reader ends the hold.
+const RESTORE_MS = 6000, SETTLED_MS = 500, MOVES = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
 function restoreScroll(y, nav) {
   const from = performance.now();
-  let moved = false;
+  let moved = false, height = 0, steadyFrom = from;
   const stop = () => { moved = true; };
   const done = () => MOVES.forEach(type => removeEventListener(type, stop, true));
   MOVES.forEach(type => addEventListener(type, stop, { capture: true, passive: true }));
   const step = () => {
     if (moved || nav !== navigation) { done(); return; }
-    if (document.documentElement.scrollHeight - innerHeight < y && performance.now() - from < RESTORE_MS) { requestAnimationFrame(step); return; }
-    window.scrollTo({ top: y }); done();
+    const now = performance.now(), doc = document.documentElement.scrollHeight, tall = doc - innerHeight >= y;
+    if (doc !== height || view.querySelector('.skeleton, .sk-rows')) { height = doc; steadyFrom = now; }
+    if (tall) window.scrollTo({ top: y });
+    if (now - from > RESTORE_MS || (tall && now - steadyFrom > SETTLED_MS)) { window.scrollTo({ top: y }); done(); return; }
+    requestAnimationFrame(step);
   };
   step();
 }
@@ -130,8 +134,10 @@ async function route(queryOnly = false, y = 0) {
 // Back and forward, and go(); a change of the #fragment alone is not a new page.
 history.scrollRestoration = 'manual';
 window.addEventListener('popstate', e => { if (location.pathname + location.search !== shown) route(false, e.state?.y ?? 0); });
-// A reload, or a return from another site, also comes back to the same place.
-window.addEventListener('pagehide', () => history.replaceState({ ...history.state, y: Math.round(scrollY) }, ''));
+// Each history entry keeps its own place, for Back, Forward, a reload and a return from another site.
+let placeTimer = null;
+const keepPlace = () => { try { history.replaceState({ ...history.state, y: Math.round(scrollY) }, ''); } catch { /* the browser's rate limit */ } };
+window.addEventListener('scroll', () => { clearTimeout(placeTimer); placeTimer = setTimeout(keepPlace, 250); }, { passive: true });
 
 // --- delegated interactions -------------------------------------------------------------
 // What a row leaves to the thing under the pointer: links, buttons, tags and pills whose note a tap opens.
