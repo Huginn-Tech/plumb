@@ -281,13 +281,14 @@ const released = () => setTimeout(() => { pressedRow = null; }, 0);
 document.addEventListener('pointerup', released, true);
 document.addEventListener('pointercancel', released, true);
 function patchAttrs(a, b) {
+  const strip = a.matches(STRIPS); // before the class changes: a skeleton turning into a table wrapper has no fades to keep
   for (const { name, value } of b.attributes) {
     if (name === 'title' && a.hasAttribute('data-tip')) { a.dataset.tip = value; continue; } // the hover note took the title
     if (a.getAttribute(name) !== value) a.setAttribute(name, value);
   }
   for (const { name } of [...a.attributes]) {
     if (b.hasAttribute(name) || (name === 'data-tip' && b.hasAttribute('title'))) continue;
-    if (name === 'style' && a.matches(STRIPS)) continue; // the edge fades live here (Firefox)
+    if (name === 'style' && strip) continue; // the edge fades live here (Firefox)
     a.removeAttribute(name);
   }
 }
