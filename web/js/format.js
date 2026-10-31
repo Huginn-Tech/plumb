@@ -23,6 +23,18 @@ export const usd = (v, opts = {}) => {
   const t = compact(v, opts);
   return t === '—' ? t : t.startsWith('-') ? `-$${t.slice(1)}` : t.startsWith('+') ? `+$${t.slice(1)}` : `$${t}`;
 };
+// Table and note amounts: cents under $10, whole dollars to $999, one decimal from
+// $1K, so a column reads at one precision. The exact figure goes in the cell's title.
+export function usdShort(v, { sign = false } = {}) {
+  const n = num(v);
+  if (n === null) return '—';
+  const a = Math.abs(n), s = n < 0 ? '-' : sign && n > 0 ? '+' : '';
+  if (a === 0) return '$0';
+  if (a < 0.005) return '<$0.01';
+  if (Number(a.toFixed(2)) < 10) return `${s}$${a.toFixed(2)}`;
+  if (a < 999.5) return `${s}$${Math.round(a)}`;
+  return `${s}$${compact(a, { digits: 1 })}`;
+}
 export function usdFull(v, digits = 2) {
   const n = num(v);
   if (n === null) return '—';
@@ -31,11 +43,16 @@ export function usdFull(v, digits = 2) {
 export function int(v) { const n = num(v); return n === null ? '—' : Math.round(n).toLocaleString('en-US'); }
 // Decimals follow the price's size and are always written out, so a column of
 // prices (a book, a tape) lines up: 0.02900 over 0.02858, never 0.029.
-export function price(v) {
+// A chain price from the API is an exact string padded to the market's
+// price_decimals ("2249.80"), so dpOf gives that market's decimals. Computed
+// prices (entry, liquidation, averages) carry more: pass dpOf of the row's mark.
+export const dpOf = v => { if (typeof v !== 'string') return null; const i = v.indexOf('.'); return i < 0 ? null : v.length - i - 1; };
+export function price(v, dp = null, list = null) {
   const n = num(v);
   if (n === null) return '—';
   const a = Math.abs(n);
-  const d = a >= 1000 ? 1 : a >= 100 ? 2 : a >= 1 ? 3 : a >= 0.01 ? 5 : 7;
+  // list is set when map() calls this: its second argument is then an index, not decimals.
+  const d = (list ? null : dp) ?? (a >= 1000 ? 1 : a >= 100 ? 2 : a >= 1 ? 3 : a >= 0.01 ? 5 : 7);
   return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 }
 export function pct(v, { digits = 2, sign = false } = {}) {
@@ -46,8 +63,9 @@ export function pct(v, { digits = 2, sign = false } = {}) {
   const t = n.toFixed(Math.abs(Number(n.toFixed(digits))) >= 100 ? 0 : digits);
   return Number(t) === 0 ? `${t.replace('-', '')}%` : `${sign && n > 0 ? '+' : ''}${t}%`;
 }
-// A share of a total: none reads 0%, and one too small for a decimal <0.1%, never 0.0%.
-export const share = v => { const n = num(v); return n === 0 ? '0%' : n !== null && n > 0 && n < 0.05 ? '<0.1%' : pct(v, { digits: 1 }); };
+// A share of a total: none reads 0%, and one too small for its decimals a floor
+// (<0.1%, or <0.01% with digits: 2), never 0.0%.
+export const share = (v, { digits = 1 } = {}) => { const n = num(v), floor = 5 / 10 ** (digits + 1); return n === 0 ? '0%' : n !== null && n > 0 && n < floor ? `<${(2 * floor).toFixed(digits)}%` : pct(v, { digits }); };
 // Basis points, as pct: a value that rounds to zero reads 0.0 bps, with no minus or plus.
 // An epoch's span, snapshot to snapshot: "Sep 16 16:00 → Sep 23 16:00 UTC".
 export function epochSpan(from) {
