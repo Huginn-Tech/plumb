@@ -134,9 +134,13 @@ window.addEventListener('popstate', e => { if (location.pathname + location.sear
 window.addEventListener('pagehide', () => history.replaceState({ ...history.state, y: Math.round(scrollY) }, ''));
 
 // --- delegated interactions -------------------------------------------------------------
+// What a row leaves to the thing under the pointer: links, buttons, tags and pills whose note a tap opens.
+const ROW_KEEPS = 'a,button,.tag[title],.tag[data-tip],.rank-pill';
+const openTab = url => window.open(url, '_blank', 'noopener');
 document.addEventListener('click', async event => {
   const t = event.target.closest('[data-copy],[data-watch],[data-seg],[data-tab],[data-sort],tr[data-href],[data-action],[data-export]');
   if (!t) return;
+  if (!getSelection().isCollapsed && t.matches('tr[data-href],tr[data-action]')) return; // a drag across a row selects its text
   if (t.dataset.export) {
     const w = parseLocation().query.get('window');
     const node = document.getElementById(t.dataset.chart), file = `plumb-${t.dataset.name || 'chart'}${w ? `-${w}` : ''}-${new Date().toISOString().slice(0, 10)}`;
@@ -150,8 +154,13 @@ document.addEventListener('click', async event => {
   if (t.dataset.tab) { current?.instance?.onTab?.(t.dataset.tab, t.dataset.v); return; }
   if (t.dataset.sort) { const [id, key] = t.dataset.sort.split(':'); current?.instance?.onSort?.(id, key); return; }
   if (t.dataset.action) { current?.instance?.onAction?.(t.dataset.action, t, event); return; }
-  if (t.dataset.href && !event.target.closest('a,button')) { go(t.dataset.href); }
+  if (t.dataset.href && !event.target.closest(ROW_KEEPS)) { if (event.ctrlKey || event.metaKey) openTab(t.dataset.href); else go(t.dataset.href); }
 });
+// A row opens as a link does: a middle press or Ctrl/Cmd click takes a new tab. Without
+// the mousedown a middle press starts the browser's autoscroll instead.
+const middleRow = event => (event.button === 1 && !event.target.closest(ROW_KEEPS) ? event.target.closest('tr[data-href]') : null);
+document.addEventListener('mousedown', event => { if (middleRow(event)) event.preventDefault(); });
+document.addEventListener('auxclick', event => { const row = middleRow(event); if (row) openTab(row.dataset.href); });
 
 document.addEventListener('click', event => {
   if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
