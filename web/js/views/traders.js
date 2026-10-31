@@ -120,7 +120,7 @@ export function mount(el, { query, setQuery, keepQuery }) {
   const letBoardGo = () => { unhold?.(); unhold = null; };
   function boardFailed(error) {
     letBoardGo(); data = null;
-    $('count').textContent = ''; morph($('pager'), '');
+    renderMeta(); $('count').textContent = ''; morph($('pager'), '');
     panelError($('list'), error.message, () => load());
   }
   async function load({ quiet = false, maxAge } = {}) {

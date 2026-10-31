@@ -747,6 +747,8 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 /* Smart money: the list ends on a whole row and keeps twelve rows' height, so a short
    answer does not pull the page up under the switch just pressed. */
 .sm-list { max-height: calc(34px + 38px * 12); min-height: calc(34px + 38px * 12); }
+#moves .table-wrap { overflow: visible; mask-image: none; animation: none; } /* the list scrolls, so its head sticks */
+#moves .t th { z-index: 2; }
 .sm-group { display: flex; align-items: center; gap: 8px; }
 .mv-verb { display: inline-block; min-width: 66px; }
 /* Columns keep their places when the list changes. */
@@ -785,11 +787,14 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 #board .sub.tags.inline .tag { height: 18px; line-height: 18px; margin: 0; }
 #board .addr { height: 20px; gap: 3px; }
 #pager .num { min-width: 92px; text-align: center; }
+/* In a tall region a failure speaks near the top, where the reader is. */
+#list .panel-error, #cohorts .panel-error { align-items: flex-start; padding-top: 96px; }
 .ep-chips .ep-chip:first-child { min-width: 48px; }
 #by .ep-chip { font-size: 13px; font-weight: 500; padding: 5px 11px; } /* as the switches beside them; lit or not, the same width */
 /* Column widths by kind, each the widest figure or label seen plus padding, so a
    press moves no column. Markets takes what is left. */
-#board { --p: 6px; }
+#board { --p: 5px; }
+@media (min-width: 1340px) { #board { --p: 6px; } }
 @media (min-width: 1440px) { #board { --p: 10px; } }
 @media (min-width: 641px) and (max-width: 1279px) { #board #list { min-height: 929px; } } /* room for the sideways scrollbar */
 @media (min-width: 641px) {
