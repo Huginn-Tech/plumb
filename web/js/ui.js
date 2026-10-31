@@ -365,7 +365,7 @@ export async function resolveWallet(text) {
   if (!q) return none('');
   const cut = q.match(CUT_ADDRESS), exact = /^(0x[0-9a-f]{40}|\d{1,9})$/i.test(q);
   if (!cut && !exact) {
-    if (!/^0x[0-9a-f]*$/i.test(q)) return none('Enter a 0x address (or prefix) or an account ID');
+    if (!/^0x[0-9a-f]{0,40}$/i.test(q)) return none('Enter a 0x address (or prefix) or an account ID');
     if (q.length < 5) return none('Keep typing: at least 3 hex digits');
   }
   const found = await get(`search?q=${encodeURIComponent(cut?.[1] ?? q)}`, { maxAge: 10000 }).catch(e => { if (exact) return null; throw e; });
