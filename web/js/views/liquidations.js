@@ -17,7 +17,7 @@ const pageOf = q => Math.max(0, (parseInt(q.get('page'), 10) || 1) - 1);
 const amt = v => (num(v) === null ? DASH : `<span class="amt" title="${esc(usdFull(v))}">${usdShort(v)}</span>`);
 const exactPrice = v => (num(v) === null ? DASH : price(v, dpOf(v)));
 // A skeleton or an error gives way to the table: patched over, its inline height would stay on the table's wrapper.
-const fill = (node, html) => { node.querySelector(':scope > .sk-rows, :scope > .panel-error')?.remove(); morph(node, html); };
+const fill = (node, html) => { if (node.querySelector(':scope > .sk-rows, :scope > .panel-error')) node.replaceChildren(); morph(node, html); };
 const logBug = e => { if (e?.status === undefined && e?.code === undefined) console.error(e); };
 
 export function mount(el, { query, setQuery, keepQuery }) {
