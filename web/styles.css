@@ -948,6 +948,38 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
   #table .t tr > :nth-last-child(1 of :not(.hide-sm)) { padding-right: 16px; }
 }
 
+
+/* Status. The result line, in the head of Pipeline. */
+.st-result { display: inline-flex; align-items: center; gap: 8px; min-height: 17.4px; }
+.st-result b { color: var(--text); font-weight: 500; }
+.st-result .status-dot { flex: none; }
+.pipeline > .sk-box { grid-column: 1 / -1; }
+/* Skeleton heights: the final layout measured at each width, in one table. */
+.st-page { --sk-pipe: 140.6px; --sk-checks: 167.4px; --sk-dec: 167.4px; --sk-int: 805.1px; }
+@media (max-width: 1220px) { .st-page { --sk-checks: 182.1px; --sk-dec: 182.1px; } }
+@media (max-width: 1170px) { .st-page { --sk-pipe: 158px; } }
+@media (max-width: 999px) { .st-page { --sk-pipe: 175.3px; --sk-checks: 125.5px; --sk-dec: 167.4px; } }
+@media (max-width: 965px) { .st-page { --sk-int: 824px; } }
+@media (max-width: 900px) { .st-page { --sk-pipe: 292.1px; } }
+@media (max-width: 640px) { .st-page { --sk-checks: 191.1px; --sk-dec: 254.8px; } }
+@media (max-width: 590px) { .st-page { --sk-pipe: 326.9px; --sk-int: 842.8px; } }
+@media (max-width: 510px) { .st-page { --sk-pipe: 344.3px; --sk-int: 870.2px; } }
+@media (max-width: 480px) { .st-page { --sk-checks: 247.6px; --sk-int: 915px; } }
+@media (max-width: 392px) { .st-page { --sk-pipe: 379.1px; --sk-int: 933.8px; } }
+@media (max-width: 387px) { .st-page { --sk-pipe: 396.5px; --sk-int: 951.2px; } }
+@media (max-width: 480px) { #decoder-meta { min-height: 34.8px; } } /* two lines once the logs count lands */
+#pipeline > .sk-box { height: var(--sk-pipe) !important; }
+#checks > .sk-box { flex: 1 0 auto; height: var(--sk-checks) !important; }
+#decoder > .sk-box { flex: 1 0 auto; height: var(--sk-dec) !important; }
+#integrity > .sk-box { height: var(--sk-int) !important; }
+.st-method { font-size: 13px; }
+/* Definitions: two columns keep a line near 100 characters; an entry stays whole. */
+.doc { padding-bottom: 2px; }
+.doc p { margin: 0; }
+.doc h3 { margin: 0 0 6px; }
+.doc-item { padding-bottom: 16px; break-inside: avoid; }
+@media (min-width: 1000px) { .doc { columns: 2; column-gap: 36px; } }
+
 /* ========== end page: risk ========== */
 
 /* ========== page: overview (overview.js) ========== */
