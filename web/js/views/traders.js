@@ -1,126 +1,172 @@
-// Trader leaderboard over a window: net PnL, volume, losses, liquidations,
+// Trader leaderboard over a period: net PnL, volume, losses, liquidations,
 // with open positions from the live contract state.
 import { get } from '../api.js';
-import { usd, int, pct, num, esc, price, ago, duration, epochSpan, epochLeft } from '../format.js';
-import { seg, table, addr, pnl, bpsCell, kpi, skeleton, mkt, mktLink, tradeAction, logo, assetOf, ICON, go, ratioCell } from '../ui.js';
+import { usd, usdShort, usdFull, int, pct, share, num, esc, price, dpOf, ago, duration, epochSpan, epochLeft } from '../format.js';
+import { seg, table, addr, pnl, pnlShort, bpsCell, kpi, skRows, skBox, skKpis, DASH, hold, morph, panelError, keepTrying, keepDots, mktLink, sideTag, logo, assetOf, ICON, go, ratioCell } from '../ui.js';
 import { SEA_ICONS } from '../cohort-icons.js';
 
-const WINDOWS = [['24h', '24H'], ['7d', '7D'], ['30d', '30D'], ['all', 'All'], ['this_epoch', 'This epoch'], ['last_epoch', 'Last epoch']];
-// Card labels per window; epochs are Perpl's weekly snapshot periods (Wednesday 16:00 UTC).
-const WINDOW_LABEL = { all: 'All-time', this_epoch: 'this epoch', last_epoch: 'last epoch' };
-// The page's window switch holds the rolling windows and drives the cards and
-// the board; Perpl's epochs sit beside the board's title as two chips that set
-// the board alone (?epoch=last or this); picking the active chip again clears it
-// (and an older ?window=<epoch> in the address gives way to the page window).
-const windowCtl = w => seg('window', WINDOWS.filter(([v]) => !v.endsWith('_epoch')), w);
+const WINDOWS = [['24h', '24H'], ['7d', '7D'], ['30d', '30D'], ['all', 'All']];
+// Card labels per window.
+const WINDOW_LABEL = { all: 'All-time' };
+// The page's window switch drives the four cards and, with no epoch picked, the
+// board. Perpl's epochs (weekly, Wednesday 16:00 UTC) sit in the board's own
+// Period group and set the board alone; one period is lit there. The board's
+// period comes from ?window= (rolling) and ?epoch=; an older ?window=last_epoch
+// link still opens the board on that epoch.
+const windowCtl = w => seg('window', WINDOWS, w);
 const EPOCHS = { this: 'this_epoch', last: 'last_epoch' };
-const epochChips = ep => [['this', 'This epoch'], ['last', 'Last epoch']].map(([v, label]) => `<button class="ep-chip${EPOCHS[v] === ep ? ' on' : ''}" data-seg="epoch" data-v="${EPOCHS[v] === ep ? '' : v}" aria-pressed="${EPOCHS[v] === ep}" title="Ranks the leaderboard over Perpl's weekly epoch: Wednesday 16:00 UTC to the next Wednesday 16:00 UTC">${label}</button>`).join('');
-// The page window from ?window= (rolling only) and the board's epoch from ?epoch=
-// (an older ?window=last_epoch link still opens the board on that epoch).
-const rollingOf = q => (WINDOWS.some(([v]) => v === q.get('window') && !v.endsWith('_epoch')) ? q.get('window') : '24h');
+const EPOCH_TIP = "Ranks the leaderboard over Perpl's weekly epoch: Wednesday 16:00 UTC to the next Wednesday 16:00 UTC";
+const rollingOf = q => (WINDOWS.some(([v]) => v === q.get('window')) ? q.get('window') : '24h');
 const epochOf = q => EPOCHS[q.get('epoch')] ?? (Object.values(EPOCHS).includes(q.get('window')) ? q.get('window') : null);
 const SORTS = [['pnl', 'Top PnL'], ['loss', 'Top losses'], ['volume', 'Volume'], ['fees', 'Fees paid'], ['liquidated', 'Liquidated'], ['net_flow', 'Net inflow'], ['deposits', 'Deposits'], ['withdrawals', 'Withdrawals']];
 const FLOW_SORTS = new Set(['net_flow', 'deposits', 'withdrawals']);
-// The ranking switches, trading rankings and flows apart, each with its label.
-const rankBy = by => `<span class="lb-label">Rank by</span>${seg('by', SORTS.filter(([v]) => !FLOW_SORTS.has(v)), by)}<span class="lb-label flows">Flows</span>${seg('by', SORTS.filter(([v]) => FLOW_SORTS.has(v)), by)}`;
+const rankOf = q => (SORTS.some(([v]) => v === q.get('by')) ? q.get('by') : 'pnl');
+const pageOf = q => Math.max(0, Math.floor(Number(q.get('page'))) - 1 || 0);
+// What each ranking orders the board by, and the column that carries the band.
+const RANKED = { pnl: 'net PnL', loss: 'largest net loss', volume: 'volume', fees: 'fees paid', liquidated: 'notional liquidated', net_flow: 'net inflow', deposits: 'deposits', withdrawals: 'withdrawals' };
+const RANKED_COL = { pnl: 'pnl', loss: 'pnl', volume: 'volume', fees: 'fees', liquidated: 'liq', net_flow: 'net', deposits: 'dep', withdrawals: 'wd' };
+// The switch group's name for a screen reader; seg() prints the group.
+const named = (html, label) => html.replace('role="group"', `role="group" aria-label="${label}"`);
+// The board's own row of switches: the period, the trading rankings, the flows.
+const periodChips = (ep, w) => {
+  const chip = (v, label, on, tip) => `<button class="ep-chip${on ? ' on' : ''}" data-seg="epoch" data-v="${v}" aria-pressed="${on}" title="${esc(tip)}">${label}</button>`;
+  return `<span class="ep-chips" role="group" aria-label="Period">${chip('', WINDOWS.find(([v]) => v === w)[1], !ep, 'The period picked at the top of the page')}${chip('this', 'This epoch', ep === EPOCHS.this, EPOCH_TIP)}${chip('last', 'Last epoch', ep === EPOCHS.last, EPOCH_TIP)}</span>`;
+};
+const rankBy = (by, ep, w) => `<span class="lb-label">Period</span>${periodChips(ep, w)}<span class="lb-label group">Rank by</span>${named(seg('by', SORTS.filter(([v]) => !FLOW_SORTS.has(v)), by), 'Rank by')}<span class="lb-label group">Flows</span>${named(seg('by', SORTS.filter(([v]) => FLOW_SORTS.has(v)), by), 'Rank by flows')}`;
 const CO_TABS = [['size', 'By size'], ['pnl', 'By track record']];
 const SM_WINDOWS = [['7d', '7D'], ['30d', '30D'], ['all', 'All']];
 const SM_SIZES = [['100', '≥$100'], ['1000', '≥$1K'], ['10000', '≥$10K']];
+const known = (list, v, fallback) => (list.some(([k]) => k === v) ? v : fallback);
+const LIMIT = 20, SM_ROWS = 12;
+// Cohort rules, by the API's key: the API's own text is shorter and names no period.
+const RULES = { whale: '≥ $100K notional', dolphin: '$10K–100K notional', fish: '$1K–10K notional', shrimp: '< $1K notional', top: '≥ +$10K all-time', winner: '$0 to +$10K all-time', loser: '-$10K to $0 all-time', rekt: '≤ -$10K all-time' };
+const CO_SIZE_DESC = "Open positions now, grouped by each trader's total open notional · click a cohort for its traders";
+// The cohorts panel's height with its strip: four cards to a row, two, or one.
+const coHeight = () => (matchMedia('(max-width: 640px)').matches ? 1500 : matchMedia('(max-width: 1240px)').matches ? 560 : 360);
+// A table amount: the short form, with the exact figure as its note.
+const money = v => `<span title="${esc(usdFull(v))}">${usdShort(v)}</span>`;
+// A skeleton or a failed panel gives way whole; anything else is patched in place.
+const put = (node, html) => { if (node.querySelector('.sk-rows, .sk-box, .skeleton, .panel-error')) node.innerHTML = html; else morph(node, html); };
+const dotted = text => keepDots(esc(text));
 
-export function mount(el, { query, setQuery }) {
-  let w = rollingOf(query), ep = epochOf(query);
-  // The board's window: the epoch when one is picked, else the page's.
+export function mount(el, { query, setQuery, keepQuery }) {
+  let w = rollingOf(query), ep = epochOf(query), by = rankOf(query), page = pageOf(query);
+  // The board's period: the epoch when one is picked, else the page's.
   const bw = () => ep ?? w;
-  let by = SORTS.some(([v]) => v === query.get('by')) ? query.get('by') : 'pnl';
-  let page = 0, alive = true, data = null, cohorts = null, coTab = 'size', coSel = null, smWin = '30d', smMin = '1000';
-  const LIMIT = 20;
+  let alive = true, data = null, cohorts = null, filter = (query.get('q') ?? '').trim();
+  let coTab = known(CO_TABS, query.get('co'), 'size'), coSel = query.get('cohort'), smWin = known(SM_WINDOWS, query.get('smw'), '30d'), smMin = known(SM_SIZES, query.get('smm'), '1000');
   el.innerHTML = `
-    <div class="page-head"><div><h1>Traders</h1><div class="sub">Rankings of every account that traded, how traders are positioned now, and the latest moves of the most profitable ones.</div></div><div id="win">${windowCtl(w)}</div></div>
+    <div class="page-head"><div><h1>Traders</h1><div class="sub">Rankings of every trader, how traders are positioned now, and the latest moves of the most profitable ones.</div></div><div id="win">${windowCtl(w)}</div></div>
     <div class="stack traders-page">
-    <div class="kpis k4" id="tkpis">${Array.from({ length: 4 }, () => '<div class="kpi"><div class="skeleton sk-line" style="width:40%"></div><div class="skeleton" style="height:26px;width:60%;margin-top:10px"></div></div>').join('')}</div>
-    <section class="panel" id="board"><div class="panel-head lb-head"><div><div class="lb-title"><h2 id="title">Leaderboard</h2><span class="ep-chips" id="epochs" role="group" aria-label="Perpl epoch">${epochChips(ep)}</span></div><div class="desc" id="meta"></div></div><div class="lb-tools"><input id="lb-search" class="calc-in lb-search" type="search" placeholder="Filter or paste a wallet" autocomplete="off" spellcheck="false" aria-label="Filter traders by address"><a class="btn ghost" id="csv">${ICON.download} CSV</a></div><div class="lb-rank" id="by" role="group" aria-label="Rank traders by">${rankBy(by)}</div></div>
-      <div class="panel-body flush" id="list">${skeleton(12)}</div>
+    <div class="kpis k4" id="tkpis">${skKpis(4)}</div>
+    <section class="panel" id="board"><div class="panel-head lb-head"><div><h2>Leaderboard</h2><div class="desc" id="meta"></div></div><div class="lb-tools"><input id="lb-search" class="calc-in lb-search" type="search" placeholder="Filter or paste a wallet" autocomplete="off" spellcheck="false" aria-label="Filter traders by address" value="${esc(filter)}"><a class="btn ghost" id="csv">${ICON.download} CSV</a></div><div class="lb-rank" id="by">${rankBy(by, ep, w)}</div></div>
+      <div class="panel-body flush" id="list">${skRows(LIMIT, 44, 34, 52)}</div>
       <div class="panel-foot pager"><span id="count"></span><span class="pager-ctl" id="pager"></span></div></section>
-    <section class="panel"><div class="panel-head"><div><h2>Positioning by cohort</h2><div class="desc" id="co-desc">Open positions now, grouped by account · click a cohort for its largest wallets</div></div><div id="co-tabs">${seg('co', CO_TABS, coTab)}</div></div>
-      <div class="panel-body flush" id="cohorts">${skeleton(4)}</div><div id="co-detail"></div></section>
-    <section class="panel"><div class="panel-head"><div><h2>Smart money moves</h2><div class="desc" id="sm-desc">What the most profitable traders are doing now</div></div><div class="sm-ctl"><div id="sm-min">${seg('smm', SM_SIZES, smMin)}</div><div id="sm-win">${seg('smw', SM_WINDOWS, smWin)}</div></div></div>
-      <div class="panel-body flush scroll sm-list" id="moves">${skeleton(6)}</div></section>
+    <section class="panel"><div class="panel-head"><div><h2>Positioning by cohort</h2><div class="desc" id="co-desc">${dotted(coTab === 'size' ? CO_SIZE_DESC : 'Traders with open positions now, grouped by all-time net PnL')}</div></div><div id="co-tabs">${seg('co', CO_TABS, coTab)}</div></div>
+      <div class="panel-body flush" id="cohorts">${skBox(coHeight())}</div><div id="co-detail"></div></section>
+    <section class="panel sm-panel"><div class="panel-head"><div><h2>Smart money moves</h2><div class="desc" id="sm-desc">What the most profitable traders are doing now</div></div><div class="sm-ctl"><div class="sm-group"><span class="lb-label">Min size</span><div id="sm-min">${named(seg('smm', SM_SIZES, smMin), 'Minimum size of a move')}</div></div><div class="sm-group"><span class="lb-label">Rank leaders over</span><div id="sm-win">${named(seg('smw', SM_WINDOWS, smWin), 'Rank leaders over')}</div></div></div></div>
+      <div class="panel-body flush scroll sm-list" id="moves">${skRows(SM_ROWS, 38, 34)}</div></section>
     </div>`;
   const $ = s => el.querySelector(`#${s}`);
-  // At most two rule-based style tags per trader; each title gives the evidence.
+  // At most two rule-based style tags per trader; each note gives the evidence.
   const DAYS = { '24h': 1, '7d': 7, '30d': 30, last_epoch: 7 };
   function styleTags(r) {
     const out = [], trades = r.trades ?? 0, vol = num(r.volume) ?? 0;
-    if (trades && vol / trades >= 25000) out.push(['Whale', `average trade ${usd(vol / trades)}`]);
+    if (trades && vol / trades >= 25000) out.push(['Large trades', `Average trade ${usdShort(vol / trades)}`]);
     if (trades >= 100 && (r.maker_share_pct ?? 0) >= 80) out.push(['Maker', `${Math.round(r.maker_share_pct)}% of volume as maker`]);
     const days = DAYS[bw()];
     if (days && trades / days >= 5000) out.push(['High frequency', `${int(trades / days)} trades a day, one every ${Math.round(86400 * days / trades)} s`]);
-    return out.slice(0, 2).map(([t, why]) => `<span class="tag" title="${esc(why)}">${t}</span>`).join(' ');
+    const tags = out.slice(0, 2).map(([t, why]) => `<span class="tag" title="${esc(why)}">${t}</span>`).join('');
+    return tags ? `<span class="sub tags inline">${tags}</span>` : '';
   }
-  const SHARE_COL = { key: 'share', label: 'Share of volume', tip: 'Share of the exchange volume in the epoch (each trade has two sides, so shares add up to 200%)', phone: false, n: true, render: r => (r.volume_share_pct === null || r.volume_share_pct === undefined ? '<span class="faint">—</span>' : pct(r.volume_share_pct, { digits: r.volume_share_pct < 1 ? 2 : 1 })) };
+  const SHARE_COL = { key: 'share', label: 'Share of volume', tip: 'Share of the exchange volume in the epoch (each trade has two sides, so shares add up to 200%)', phone: false, n: true, render: r => (num(r.volume_share_pct) === null ? DASH : share(r.volume_share_pct, { digits: r.volume_share_pct < 1 ? 2 : 1 })) };
   const COLS = [
-    { key: 'rank', label: '#', render: r => `<span class="rank">${r.rank}</span>` },
-    { key: 'addr', label: 'Trader', render: r => { const t = styleTags(r); return `${addr(r.address, r.account)}${t ? `<div class="sub tags">${t}</div>` : ''}`; } },
-    { key: 'pnl', label: 'Net PnL', tip: 'Realized PnL, funding included, minus fees', n: true, render: r => pnl(r.pnl) },
-    { key: 'roi', label: 'PnL / volume', tip: 'Net PnL per dollar traded, in basis points; shown from $1K of volume in the window', phone: false, n: true, render: r => ratioCell(r.roi_on_volume_bps, r.volume) }, // in bps, as the KPI above and the wallet page
-    { key: 'volume', label: 'Volume', n: true, render: r => usd(r.volume) },
-    { key: 'trades', label: 'Trades', phone: false, n: true, render: r => int(r.trades) },
-    { key: 'maker', label: 'Maker share', phone: false, n: true, render: r => pct(r.maker_share_pct, { digits: 0 }) },
-    { key: 'fees', label: 'Fees', phone: false, n: true, render: r => usd(r.fees) },
-    { key: 'liq', label: 'Liquidated', phone: false, n: true, render: r => (num(r.liquidated) > 0 ? `<span class="neg">${usd(r.liquidated)}</span>` : '<span class="faint">—</span>') },
-    { key: 'dep', flow: true, label: 'Deposits', n: true, render: r => (num(r.deposits) > 0 ? usd(r.deposits) : '<span class="faint">—</span>') },
-    { key: 'wd', flow: true, label: 'Withdrawals', n: true, render: r => (num(r.withdrawals) > 0 ? usd(r.withdrawals) : '<span class="faint">—</span>') },
-    { key: 'net', flow: true, label: 'Net flow', n: true, render: r => { const v = (num(r.deposits) ?? 0) - (num(r.withdrawals) ?? 0); return v ? pnl(v) : '<span class="faint">—</span>'; } },
-    { key: 'open', label: 'Open now', phone: false, n: true, render: r => (r.open_positions ? `${usd(r.open_notional)}<div class="sub">${r.open_positions} pos · uPnL ${usd(r.unrealized_pnl, { sign: true })}</div>` : '<span class="faint">—</span>') },
-    { key: 'markets', label: 'Markets', phone: false, render: r => `<span class="muted">${esc(r.markets.slice(0, 4).join(' · '))}${r.markets.length > 4 ? ` +${r.markets.length - 4}` : ''}</span>` }
+    { key: 'rank', label: '#', render: r => `<span class="rank">${int(r.rank)}</span>` },
+    { key: 'addr', label: 'Trader', render: r => addr(r.address, r.account, { after: styleTags(r) }) },
+    { key: 'pnl', label: 'Net PnL', tip: 'Realized PnL with funding, minus fees, in the period', n: true, render: r => pnlShort(r.pnl) },
+    { key: 'roi', label: 'PnL / volume', tip: 'Net PnL as a share of volume. 10 bps is $1 per $1,000 traded. Shown from $1K of volume.', phone: false, n: true, render: r => ratioCell(r.roi_on_volume_bps, r.volume) }, // in bps, as the card above and the wallet page
+    { key: 'volume', label: 'Volume', tip: 'Notional this trader traded in the period, as maker and taker', n: true, render: r => money(r.volume) },
+    { key: 'trades', label: 'Trades', tip: "This trader's opens, adds, reduces, closes, flips and liquidations in the period", phone: false, n: true, render: r => int(r.trades) },
+    { key: 'maker', label: 'Maker share', tip: "Share of this trader's volume filled as maker", phone: false, n: true, render: r => (num(r.maker_share_pct) === null ? DASH : share(r.maker_share_pct)) },
+    { key: 'fees', label: 'Fees paid', tip: 'Trading and liquidation fees paid in the period', phone: false, n: true, render: r => money(r.fees) },
+    { key: 'liq', label: 'Liquidated', tip: "Notional of this trader's positions liquidated in the period", phone: false, n: true, render: r => (num(r.liquidated) > 0 ? `<span class="neg" title="${esc(usdFull(r.liquidated))}">${usdShort(r.liquidated)}</span>` : DASH) },
+    { key: 'dep', flow: true, label: 'Deposits', n: true, render: r => (num(r.deposits) > 0 ? money(r.deposits) : DASH) },
+    { key: 'wd', flow: true, label: 'Withdrawals', n: true, render: r => (num(r.withdrawals) > 0 ? money(r.withdrawals) : DASH) },
+    { key: 'net', flow: true, label: 'Net flow', tip: 'Deposits minus withdrawals in the period', n: true, render: r => { const v = (num(r.deposits) ?? 0) - (num(r.withdrawals) ?? 0); return v ? `<span title="${esc(usdFull(v))}">${usdShort(v, { sign: true })}</span>` : DASH; } },
+    { key: 'pos', label: 'Positions', tip: 'Open positions now, whatever the period', phone: false, n: true, render: r => (r.open_positions ? int(r.open_positions) : DASH) },
+    { key: 'open', label: 'Open notional', tip: 'Open positions at the mark price, now, whatever the period', phone: false, n: true, render: r => (r.open_positions ? money(r.open_notional) : DASH) },
+    { key: 'upnl', label: 'Unrealized', tip: 'Unrealized PnL of those positions now, whatever the period', phone: false, n: true, render: r => (r.open_positions ? pnlShort(r.unrealized_pnl) : DASH) },
+    { key: 'markets', label: 'Markets', tip: 'Markets traded in the period', phone: false, render: r => `<span class="muted" title="${esc(r.markets.join(' · '))}">${esc(r.markets.slice(0, 4).join(' · '))}${r.markets.length > 4 ? ` +${r.markets.length - 4}` : ''}</span>` }
   ];
-  let seq = 0;
-  async function load() {
-    const asked = ++seq;
-    $('list').innerHTML = skeleton(12);
-    const d = await get(`leaderboard?window=${bw()}&by=${by}&limit=${LIMIT}&offset=${page * LIMIT}`);
-    if (!alive || asked !== seq) return; // a newer page or window was asked for meanwhile
-    data = d;
-    $('title').textContent = SORTS.find(([v]) => v === by)[1];
-    renderMeta();
-    // Flow rankings swap the fee and liquidation columns for the flows themselves;
-    // an epoch shows each account's share of the epoch's volume where open positions (now) would be.
+  // Flow rankings swap the maker, fee and liquidation columns for the flows
+  // themselves; an epoch shows each trader's share of the epoch's volume where the
+  // open positions (now) would be.
+  function columnsFor() {
     const flow = FLOW_SORTS.has(by), epoch = ep !== null;
-    const columns = COLS.filter(c => (flow ? !['fees', 'liq', 'maker'].includes(c.key) : !c.flow)).map(c => (epoch && c.key === 'open' ? SHARE_COL : c));
-    lbColumns = columns; renderList();
-    $('csv').href = `/api/v1/leaderboard?window=${bw()}&by=${by}&limit=200&format=csv`;
+    return COLS.filter(c => (flow ? !['fees', 'liq', 'maker'].includes(c.key) : !c.flow)).filter(c => !(epoch && ['pos', 'upnl'].includes(c.key))).map(c => (epoch && c.key === 'open' ? SHARE_COL : c));
+  }
+  const csvHref = () => `/api/v1/leaderboard?window=${bw()}&by=${by}&limit=200&format=csv`;
+  $('csv').href = csvHref();
+
+  // The board holds its old rows, dimmed, until the new ones land, whichever press
+  // asked; only the latest answer is drawn. A failure takes the old rows away, so no
+  // figure sits under a switch it does not belong to, and keepTrying brings it back.
+  let lbColumns = null, seq = 0, unhold = null, stopBoard = () => {};
+  const letBoardGo = () => { unhold?.(); unhold = null; };
+  function boardFailed(error) {
+    letBoardGo(); data = null;
+    $('count').textContent = ''; morph($('pager'), '');
+    panelError($('list'), error.message, () => load());
+  }
+  async function load({ quiet = false, maxAge } = {}) {
+    const asked = ++seq;
+    if (!quiet && !$('list').querySelector('.sk-rows')) unhold ??= hold($('list'));
+    const d = await get(`leaderboard?window=${bw()}&by=${by}&limit=${LIMIT}&offset=${page * LIMIT}`, maxAge === undefined ? {} : { maxAge }).catch(error => {
+      if (alive && asked === seq && (!quiet || !data)) boardFailed(error); // a quiet refresh over good rows leaves them be
+      throw error;
+    });
+    if (!alive || asked !== seq) return;
+    // An old link to a page past the end opens the first one.
+    if (!d.rows.length && page > 0) { page = 0; keepQuery({ page: null }); await load({ quiet, maxAge }); return; }
+    data = d; letBoardGo();
+    renderMeta();
+    lbColumns = columnsFor();
+    renderList();
     renderPager();
   }
-  // The board's subtitle: the window, and for an epoch its span, the time to the
-  // snapshot (or final), its traders and volume. Hovering it names the epoch's blocks.
+  const board = () => { stopBoard(); let again = false; stopBoard = keepTrying(() => { const quiet = again; again = true; return load({ quiet }); }, { alive: () => alive }); };
+  // The board's subtitle: what it ranks, over which period, and for an epoch its
+  // span, the time to its end and its volume. Hovering it names the epoch's blocks.
   function renderMeta() {
-    if (!data) return;
-    const m = data.meta, partial = m.coverage && !m.coverage.complete ? ' · history still indexing' : '';
-    const size = `${int(data.total)} traders${num(m.volume) ? ` · ${usd(m.volume)} volume` : ''}`;
-    const text = ep === 'this_epoch' ? `This epoch · ${epochSpan(m.from)} · snapshot in ${epochLeft(m.from)} · ${size}` : ep === 'last_epoch' ? `Last epoch · ${epochSpan(m.from)} · final · ${size}` : w === 'all' ? 'All-time' : `Last ${w}`;
-    $('meta').textContent = text + partial;
+    const head = `Ranked by ${RANKED[by]}`, period = ep === 'this_epoch' ? 'this epoch' : ep === 'last_epoch' ? 'last epoch' : w === 'all' ? 'all-time' : `last ${w}`;
+    if (!data) { morph($('meta'), dotted(`${head} · ${period}`)); return; }
+    const m = data.meta, who = FLOW_SORTS.has(by) ? 'accounts' : 'traders', partial = m.coverage && !m.coverage.complete ? ' · history still indexing' : '';
+    const size = `${int(data.total)} ${who}${num(m.volume) ? ` · ${usd(m.volume)} volume` : ''}`;
+    const text = ep === 'this_epoch' ? `${head} · ${period}, ${epochSpan(m.from)} · ends in ${epochLeft(m.from)} · ${size}` : ep === 'last_epoch' ? `${head} · ${period}, ${epochSpan(m.from)} · final · ${size}` : `${head} · ${period} · ${size}`;
+    morph($('meta'), dotted(text + partial));
     $('meta').title = m.blocks?.first ? `Perpl activity from block ${int(m.blocks.first)} to block ${int(m.blocks.last)}` : '';
   }
-  // The countdown moves on; at the snapshot the epoch under way turns into the
+  renderMeta();
+  // The countdown moves on; at the epoch's end the one under way turns into the
   // last one, within seconds (and again until the server has rolled over too).
-  const epochTimer = setInterval(() => { if (!data || ep !== 'this_epoch') return; if (Date.now() / 1000 >= data.meta.from + 7 * 86400) load().catch(() => {}); else renderMeta(); }, 10000);
-  // Prev is off on the first page and Next on the last; one page needs neither.
+  const epochTimer = setInterval(() => { if (!data || ep !== 'this_epoch' || unhold) return; if (Date.now() / 1000 >= data.meta.from + 7 * 86400) load({ quiet: true, maxAge: 0 }).catch(() => {}); else renderMeta(); }, 10000);
+  // Prev is off on the first page and Next on the last; one page needs neither, nor
+  // does a filter that found nothing here.
   const pages = () => Math.max(1, Math.ceil((data?.total ?? 0) / LIMIT));
-  function renderPager() { const n = pages(); $('pager').innerHTML = n > 1 ? `<button class="btn ghost sm" data-action="prev" ${page === 0 ? 'disabled' : ''}>← Prev</button><span class="num">Page ${int(page + 1)} of ${int(n)}</span><button class="btn ghost sm" data-action="next" ${page + 1 >= n ? 'disabled' : ''}>Next →</button>` : ''; }
-  // A new page starts at the board's head, not at the foot where Next was.
-  function goTo(n) { page = n; renderPager(); load().then(() => { const top = $('board'); if (alive && top.getBoundingClientRect().top < 0) top.scrollIntoView({ block: 'start' }); }).catch(() => {}); }
+  function renderPager(hidden = false) { const n = pages(); morph($('pager'), n > 1 && !hidden ? `<button class="btn ghost sm" data-action="prev" ${page === 0 ? 'disabled' : ''}>← Prev</button><span class="num">Page ${int(page + 1)} of ${int(n)}</span><button class="btn ghost sm" data-action="next" ${page + 1 >= n ? 'disabled' : ''}>Next →</button>` : ''); }
+  // The press is kept in the address, so Back returns to this page of the board.
+  function goTo(n) { page = n; keepQuery({ page: n ? n + 1 : null }); renderPager(); board(); }
   // The leaderboard page, filtered by the address typed in its search box.
-  let lbColumns = null, filter = '';
   function renderList() {
     if (!data || !lbColumns) return;
-    const f = filter.toLowerCase();
+    const f = filter.toLowerCase(), who = FLOW_SORTS.has(by) ? 'accounts' : 'traders';
     const rows = f ? data.rows.filter(r => String(r.address ?? '').toLowerCase().includes(f) || String(r.account) === f.replace(/^#/, '')) : data.rows;
-    $('list').innerHTML = table({ id: 'lb', columns: lbColumns, rows, rowAttrs: r => `class="link" data-href="/wallet/${esc(r.address || r.account)}"`, emptyText: f ? 'Not on this page. Press Enter to open the wallet, if it is a full address or account ID.' : 'No traders in this window' });
+    put($('list'), table({ id: 'lb', columns: lbColumns, rows, focusKey: RANKED_COL[by], rowAttrs: r => `class="link" data-href="/wallet/${esc(r.address || r.account)}"`, emptyText: f ? 'Not on this page. Press Enter to open the wallet, if it is a full address or account ID.' : `No ${who} in this period` }));
     // The count says what is on screen: a filter's matches on this page, or the page's place in the ranking.
-    $('count').textContent = !data.total ? '' : f ? `${int(rows.length)} of ${int(data.rows.length)} on this page match` : `${int(data.total)} accounts · showing ${int(page * LIMIT + 1)}–${int(page * LIMIT + data.rows.length)}`;
+    $('count').textContent = !data.total ? '' : f ? `${int(rows.length)} of ${int(data.rows.length)} on this page match` : `${int(data.total)} ${who} · showing ${int(page * LIMIT + 1)}–${int(page * LIMIT + data.rows.length)}`;
   }
-  $('lb-search').addEventListener('input', e => { filter = e.target.value.trim(); renderList(); });
-  $('lb-search').addEventListener('keydown', e => { const q = e.target.value.trim(); if (e.key === 'Enter' && (/^0x[0-9a-fA-F]{40}$/.test(q) || /^\d{1,9}$/.test(q))) go(`/wallet/${q}`); });
+  $('lb-search').addEventListener('input', e => { filter = e.target.value.trim(); keepQuery({ q: filter }); renderList(); renderPager(Boolean(filter) && !$('list').querySelector('tbody')); });
+  $('lb-search').addEventListener('keydown', e => { const q = e.target.value.trim().replace(/^#/, ''); if (e.key === 'Enter' && (/^0x[0-9a-fA-F]{40}$/.test(q) || /^\d{1,9}$/.test(q))) go(`/wallet/${q}`); });
 
   // The latest position changes of the top directional traders (makers and
   // high-frequency accounts left out server-side), ranked by net PnL in smWin.
@@ -138,44 +184,67 @@ export function mount(el, { query, setQuery }) {
     }
     return out;
   }
-  const moveAction = r => { const side = r.side === 'long' || r.side === 'short' ? r.side : ''; const opening = ['open', 'increase'].includes(r.kind) || (r.kind === 'invert'); const cls = r.kind === 'liquidation' ? 'neg' : (side === 'long') === opening ? 'pos' : 'neg'; return `<span class="${cls}">${MOVE_VERBS[r.kind] ?? r.kind} ${esc(side)}</span>${r.count > 1 ? ` <span class="tag hide-sm" title="${r.count} fills over ${Math.max(1, Math.round((r.ts - r.oldest) / 60))} min">×${r.count}</span>` : ''}`; };
+  // The verb in plain text and the side as a tag: a red "Close long" beside a green gain read as a loss.
+  const moveAction = r => `<span class="mv-verb">${esc(MOVE_VERBS[r.kind] ?? r.kind)}</span>${sideTag(r.side)}${r.count > 1 ? ` <span class="tag hide-sm" title="${r.count} fills over ${Math.max(1, Math.round((r.ts - r.oldest) / 60))} min">×${r.count}</span>` : ''}`;
   // The API returns at most this many raw fills; a busy leader can fill them all.
   const MOVE_FILLS = 500;
-  async function loadMoves() {
-    const m = await get(`traders/moves?window=${smWin}&min=${smMin}&limit=${MOVE_FILLS}`, { maxAge: 8000 });
-    if (!alive) return;
-    const wl = smWin === 'all' ? 'All-time' : smWin;
+  let mvSeq = 0, mvRelease = null, movesShown = false;
+  const letMovesGo = () => { mvRelease?.(); mvRelease = null; };
+  async function loadMoves({ press = false, maxAge = 8000 } = {}) {
+    const asked = ++mvSeq;
+    if (press && movesShown) mvRelease ??= hold($('moves'));
+    const m = await get(`traders/moves?window=${smWin}&min=${smMin}&limit=${MOVE_FILLS}`, { maxAge }).catch(error => {
+      // Only a press or a first load shows the failure; a timer's miss leaves the list be.
+      if (alive && asked === mvSeq && (press || mvRelease || !movesShown)) { letMovesGo(); movesShown = false; panelError($('moves'), error.message, () => loadMoves({ press: true })); }
+      throw error;
+    });
+    if (!alive || asked !== mvSeq) return;
+    const fresh = Boolean(mvRelease);
+    letMovesGo();
+    const wl = smWin === 'all' ? 'all-time' : smWin;
     // Cut off by the fill limit, the list covers less than the 7 days asked for: it says how much.
     const oldest = m.rows.at(-1)?.ts, cut = m.rows.length >= MOVE_FILLS && oldest;
     const span = cut ? `the last ${duration(Date.now() / 1000 - oldest)} (the latest ${int(MOVE_FILLS)} fills)` : 'last 7 days';
-    $('sm-desc').textContent = `Latest position changes of the ${int(m.leaders)} most profitable directional traders by net PnL (${wl}), ${span}${m.excluded ? ` · ${int(m.excluded)} market-making and high-frequency accounts (by ${wl} activity) left out` : ''}`;
-    $('moves').innerHTML = table({ id: 'moves', compact: true, emptyText: 'No moves by these traders in the last 7 days', columns: [
-      { key: 't', label: 'When', render: r => `<span class="muted num" title="${esc(new Date(r.ts * 1000).toISOString().replace('T', ' ').slice(0, 19))} UTC">${ago(r.ts)}</span>` },
+    morph($('sm-desc'), dotted(`${int(m.leaders)} most profitable directional traders by net PnL (${wl}) · their moves, ${span}${m.excluded ? ` · ${int(m.excluded)} market-making and high-frequency accounts left out` : ''}`));
+    put($('moves'), table({ id: 'moves', compact: true, emptyText: 'No moves by these traders in the last 7 days', columns: [
+      { key: 't', label: 'Time', render: r => `<span class="muted num" title="${esc(new Date(r.ts * 1000).toISOString().replace('T', ' ').slice(0, 19))} UTC">${ago(r.ts)}</span>` },
       { key: 'a', label: 'Trader', phone: false, render: r => `<span class="sm-trader"><span class="rank-pill" title="Rank by net PnL among all traders, ${esc(wl)}">#${int(r.leader.rank)}</span>${addr(r.address, r.account)}</span>` },
       { key: 'x', label: 'Action', render: moveAction },
       { key: 'm', label: 'Market', render: r => mktLink(r.market, r.symbol) },
-      { key: 'n', label: 'Notional', n: true, render: r => usd(r.notional) },
-      { key: 'p', label: 'Price', phone: false, n: true, render: r => price(r.count > 1 && r.size ? r.notional / r.size : r.price) },
-      { key: 'r', label: 'Realized', phone: false, n: true, render: r => (['decrease', 'close', 'invert', 'liquidation', 'deleverage'].includes(r.kind) && num(r.pnl) ? pnl(r.pnl) : '<span class="faint">—</span>') },
-      { key: 'l', label: `Net PnL · ${wl}`, phone: false, n: true, render: r => pnl(r.leader.pnl) }
-    ], rows: foldMoves(m.rows).slice(0, 30), rowAttrs: r => `class="link" data-href="/wallet/${esc(r.address || r.account)}"` });
+      { key: 'n', label: 'Notional', n: true, render: r => money(r.notional) },
+      { key: 'p', label: 'Price', phone: false, n: true, render: r => price(r.count > 1 && r.size ? r.notional / r.size : r.price, dpOf(r.price)) },
+      { key: 'r', label: 'Realized PnL', tip: 'Profit or loss this move booked, before fees', phone: false, n: true, render: r => (['decrease', 'close', 'invert', 'liquidation', 'deleverage'].includes(r.kind) && num(r.pnl) ? pnlShort(r.pnl) : DASH) },
+      { key: 'l', label: `Net PnL · ${wl}`, tip: "This trader's net PnL over the period that ranked them, not from this move", phone: false, n: true, render: r => pnlShort(r.leader.pnl) }
+    ], rows: foldMoves(m.rows).slice(0, 30), rowAttrs: r => `class="link" data-href="/wallet/${esc(r.address || r.account)}"` }));
+    movesShown = true;
+    if (fresh) $('moves').scrollTop = 0; // a new list starts at its top
   }
 
-  // Traders at a glance for the leaderboard's window.
-  async function loadSummary() {
-    const t = await get(`traders/summary?window=${w}`, { maxAge: 20000 });
-    if (!alive) return;
-    const wl = WINDOW_LABEL[w] ?? w, partial = t.meta?.coverage && !t.meta.coverage.complete ? ' <span class="tag warn" title="History for this window is still being indexed">partial</span>' : '';
-    $('tkpis').innerHTML = [
+  // Traders at a glance for the page's window.
+  let sumSeq = 0, sumRelease = null, cardsShown = false, stopSummary = () => {};
+  const letCardsGo = () => { sumRelease?.(); sumRelease = null; };
+  async function loadSummary({ quiet = false, maxAge = 20000 } = {}) {
+    const asked = ++sumSeq;
+    if (!quiet && cardsShown) sumRelease ??= hold($('tkpis'));
+    const t = await get(`traders/summary?window=${w}`, { maxAge }).catch(error => {
+      if (alive && asked === sumSeq && (!quiet || !cardsShown)) { letCardsGo(); cardsShown = false; panelError($('tkpis'), error.message, () => loadSummary()); }
+      throw error;
+    });
+    if (!alive || asked !== sumSeq) return;
+    letCardsGo();
+    const wl = WINDOW_LABEL[w] ?? w, partial = t.meta?.coverage && !t.meta.coverage.complete ? ' <span class="status-dot warn" title="History for this period is still being indexed"></span>' : '';
+    put($('tkpis'), [
       kpi({ label: `Traders · ${wl}`, value: int(t.traders), note: `${usd(t.volume)} volume${partial}` }),
-      kpi({ label: `Profitable · ${wl}`, value: int(t.profitable), note: `${pct(t.profitable_pct, { digits: 1 })} of traders, after fees` }),
-      kpi({ label: `Traders' net PnL · ${wl}`, value: pnl(t.net_pnl), note: 'all traders, after fees', tip: 'Realized PnL with funding, minus fees, summed over every trader in the window.' }),
-      kpi({ label: `Median PnL / volume · ${wl}`, value: num(t.median_pnl_per_volume_bps) === null ? '—' : bpsCell(t.median_pnl_per_volume_bps), note: 'the typical trader, per $ traded', tip: 'Net PnL per dollar traded for the median trader: half of traders did better, half worse.' })
-    ].join('');
+      kpi({ label: `Profitable · ${wl}`, value: int(t.profitable), note: `${pct(t.profitable_pct, { digits: 1 })} of traders, after fees`, tip: 'Traders with net PnL above zero in the period, after fees' }),
+      kpi({ label: `Traders' net PnL · ${wl}`, value: pnl(t.net_pnl), note: 'all traders, after fees', tip: 'Realized PnL with funding, minus fees, summed over every trader in the period.' }),
+      kpi({ label: `Median PnL / volume · ${wl}`, value: num(t.median_pnl_per_volume_bps) === null ? DASH : bpsCell(t.median_pnl_per_volume_bps), note: 'the middle trader · 10 bps is $1 per $1,000', tip: 'Half of traders did better than this, half worse. 10 bps is $1 per $1,000 traded.' })
+    ].join(''));
+    cardsShown = true;
   }
+  const summary = () => { stopSummary(); let again = false; stopSummary = keepTrying(() => { const quiet = again; again = true; return loadSummary({ quiet }); }, { alive: () => alive }); };
 
-  // Cohorts: who holds the open interest, by size or by track record. One card
-  // per cohort: its direction three ways (label, split bar, long/short $), its
+  // Cohorts: who holds the open interest, by size or by track record. One unit per
+  // cohort: its direction three ways (label, split bar, long/short $), its
   // share of all open notional, and where it is positioned. Purple marks
   // identity; green and red only ever mean long and short.
   const CO_SHADES = ['#6f5cff', '#8f82ff', '#b3aaff', '#d9d4ff'];
@@ -187,55 +256,86 @@ export function mount(el, { query, setQuery }) {
     loser: stroke('<path d="M3 7l6 6 4-4 8 8"/><path d="M15 17h6v-6"/>'),
     rekt: stroke('<path d="M12 3a8 8 0 0 0-5 14.2V20h10v-2.8A8 8 0 0 0 12 3z"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><path d="M10.5 20v-2M13.5 20v-2"/>')
   };
-  // Net exposure names its side ("short $142K"): a bare "-$142K" read like a loss.
-  const netSide = v => { const n = num(v) ?? 0; return n ? `<span class="${n > 0 ? 'pos' : 'neg'}">${n > 0 ? 'long' : 'short'} ${usd(Math.abs(n))}</span>` : '<span class="faint">flat</span>'; };
+  // Net exposure names its side ("$142K short"): a bare "-$142K" read like a loss.
+  const netSide = v => { const n = num(v) ?? 0; return n ? `<span class="${n > 0 ? 'pos' : 'neg'}" title="${esc(usdFull(Math.abs(n)))}">${usdShort(Math.abs(n))} ${n > 0 ? 'long' : 'short'}</span>` : '<span class="faint">flat</span>'; };
   function biasOf(s) {
-    if (s === null || s === undefined) return ['No positions', 'flat', ''];
-    return s >= 65 ? ['Strong long', 'long', '▲'] : s >= 55 ? ['Long', 'long', '▲'] : s <= 35 ? ['Strong short', 'short', '▼'] : s <= 45 ? ['Short', 'short', '▼'] : ['Neutral', 'flat', '◆'];
+    if (s === null || s === undefined) return ['No positions', 'flat', '', ''];
+    const of = 'of open notional is long';
+    return s >= 65 ? ['Strong long', 'long', '▲', `Strong long: 65% or more ${of}`] : s >= 55 ? ['Long', 'long', '▲', `Long: 55–65% ${of}`] : s <= 35 ? ['Strong short', 'short', '▼', `Strong short: 35% or less ${of}`] : s <= 45 ? ['Short', 'short', '▼', `Short: 35–45% ${of}`] : ['Balanced', 'flat', '◆', `Balanced: 45–55% ${of}`];
   }
   function renderCohorts() {
     if (!cohorts) return;
     const groups = coTab === 'size' ? cohorts.by_size : cohorts.by_pnl;
     const held = g => g.long_notional + g.short_notional, all = groups.reduce((a, g) => a + held(g), 0) || 1;
     // Where the open notional sits, cohort by cohort.
-    const strip = `<div class="co-strip"><div class="co-strip-head"><span>Open notional held</span><span class="faint">${usd(all)} long + short</span></div><div class="co-strip-bar">${groups.map((g, i) => (held(g) > 0 ? `<i style="flex:${held(g)};background:${CO_SHADES[i % CO_SHADES.length]}" title="${esc(g.label)}: ${esc(usd(held(g)))} (${pct(held(g) / all * 100, { digits: 1 })})"></i>` : '')).join('')}</div>
-      <div class="co-strip-keys">${groups.map((g, i) => `<span><i style="background:${CO_SHADES[i % CO_SHADES.length]}"></i>${esc(g.label)} <b>${pct(held(g) / all * 100, { digits: 0 })}</b></span>`).join('')}</div></div>`;
+    const strip = `<div class="co-strip"><div class="co-strip-head"><span>Open notional held</span><span class="faint" title="${esc(usdFull(all))}">${usdShort(all)} long + short</span></div><div class="co-strip-bar">${groups.map((g, i) => (held(g) > 0 ? `<i style="flex:${held(g)};background:${CO_SHADES[i % CO_SHADES.length]}" title="${esc(g.label)}: ${esc(usdShort(held(g)))} (${share(held(g) / all * 100)})"></i>` : '')).join('')}</div>
+      <div class="co-strip-keys">${groups.map((g, i) => `<span><i style="background:${CO_SHADES[i % CO_SHADES.length]}"></i>${esc(g.label)} <b>${share(held(g) / all * 100, { digits: 0 })}</b></span>`).join('')}<span class="co-arrows">↑ net long · ↓ net short</span></div></div>`;
     const card = (g, i) => {
-      const [label, cls, arrow] = biasOf(g.accounts ? g.long_share_pct : null), l = g.long_share_pct ?? 50;
-      const markets = g.markets.slice(0, 3).map(m => `<span class="co-mk ${m.long >= m.short ? 'long' : 'short'}">${logo(m.market, m.symbol, 14)}${esc(assetOf(m.symbol))}${m.long >= m.short ? '↑' : '↓'}</span>`).join('');
+      const [label, cls, arrow, rule] = biasOf(g.accounts ? g.long_share_pct : null), l = g.long_share_pct ?? 50, lp = Math.round(l);
+      const markets = g.markets.slice(0, 3).map(m => `<span class="co-mk ${m.long >= m.short ? 'long' : 'short'}" title="${esc(`${assetOf(m.symbol)}: ${usdShort(m.long)} long, ${usdShort(m.short)} short`)}">${logo(m.market, m.symbol, 14)}${esc(assetOf(m.symbol))}${m.long >= m.short ? '↑' : '↓'}</span>`).join('');
+      const amount = v => `<span title="${esc(usdFull(v))}">${usdShort(v)}</span>`;
       return `<button type="button" class="co-card${coSel === g.key ? ' sel' : ''}" data-action="co-pick" data-key="${esc(g.key)}" aria-pressed="${coSel === g.key}">
-        <div class="co-top"><span class="co-ic" style="--shade:${CO_SHADES[i % CO_SHADES.length]}">${CO_ICON[g.key] ?? ''}</span><span class="co-id"><b>${esc(g.label)}</b><span>${esc(g.rule)}</span></span><span class="co-pill ${cls}">${arrow} ${label}</span></div>
-        <div class="co-count"><b>${int(g.accounts)}</b> wallets<span class="co-ls"><span class="pos">${int(g.net_long_accounts)} long</span> · <span class="neg">${int(g.net_short_accounts)} short</span></span></div>
+        <div class="co-top"><span class="co-ic" style="--shade:${CO_SHADES[i % CO_SHADES.length]}">${CO_ICON[g.key] ?? ''}</span><span class="co-id"><b>${esc(g.label)}</b><span>${esc(RULES[g.key] ?? g.rule)}</span></span><span class="co-pill ${cls}"${rule ? ` title="${esc(rule)}"` : ''}>${arrow} ${label}</span></div>
+        <div class="co-count"><span><b>${int(g.accounts)}</b> ${g.accounts === 1 ? 'trader' : 'traders'}</span><span class="co-ls"><span class="pos">${int(g.net_long_accounts)} net long</span> · <span class="neg">${int(g.net_short_accounts)} net short</span></span></div>
         <div class="co-bar" title="${pct(l, { digits: 1 })} of this cohort's open notional is long">${g.accounts ? `<i style="width:${l}%"></i><i></i>` : ''}</div>
-        <div class="co-ends"><span class="pos">${usd(g.long_notional)} <small>L</small></span><span class="co-share">${pct(l, { digits: 0 })} long</span><span class="neg"><small>S</small> ${usd(g.short_notional)}</span></div>
-        <div class="co-stats"><span title="Long minus short open notional">Net exposure<b>${netSide(g.net_notional)}</b></span><span>uPnL<b>${pnl(g.unrealized_pnl)}</b></span><span>In profit<b>${int(g.in_profit)}/${int(g.accounts)}</b></span></div>
+        <div class="co-ends"><span class="pos">Long ${amount(g.long_notional)}${g.accounts ? ` · ${lp}%` : ''}</span><span class="neg">${g.accounts ? `${100 - lp}% · ` : ''}Short ${amount(g.short_notional)}</span></div>
+        <div class="co-stats"><span title="Long minus short open notional">Net exposure<b>${netSide(g.net_notional)}</b></span><span title="Unrealized PnL of this cohort's open positions">Unrealized<b>${pnlShort(g.unrealized_pnl)}</b></span><span title="Traders whose open positions show a gain now">In profit<b>${int(g.in_profit)} of ${int(g.accounts)}</b></span></div>
         <div class="co-mks">${markets || '<span class="faint">No open positions</span>'}</div>
       </button>`;
     };
-    $('cohorts').innerHTML = `<div class="panel-body">${strip}<div class="co-grid">${groups.map(card).join('')}</div></div>`;
-    $('co-desc').textContent = coTab === 'size' ? 'Open positions now, grouped by each account\'s total open notional · click a cohort for its wallets' : `Grouped by net PnL over indexed history${cohorts.meta?.coverage && !cohorts.meta.coverage.complete ? ' (history still indexing)' : ''}${cohorts.unranked ? ` · ${int(cohorts.unranked)} accounts without indexed trades left out` : ''}`;
+    put($('cohorts'), `<div class="panel-body">${strip}<div class="co-grid">${groups.map(card).join('')}</div></div>`);
+    morph($('co-desc'), dotted(coTab === 'size' ? CO_SIZE_DESC : `Traders with open positions now, grouped by all-time net PnL${cohorts.meta?.coverage && !cohorts.meta.coverage.complete ? ' (history still indexing)' : ''}${cohorts.unranked ? ` · ${int(cohorts.unranked)} accounts without indexed trades left out` : ''}`));
     const g = groups.find(x => x.key === coSel);
-    $('co-detail').innerHTML = g ? `<div class="panel-head" style="min-height:0;padding-top:12px"><h2 style="font-size:12.5px;color:var(--text-2);font-weight:500">${esc(g.label)}: largest wallets</h2><button class="btn ghost" data-action="co-close">Close</button></div>${table({ id: 'co-top', compact: true, emptyText: 'No accounts', columns: [
-      { key: 'a', label: 'Wallet', render: a => addr(a.address, a.account) },
-      { key: 'n', label: 'Open notional', n: true, render: a => usd(a.notional) },
+    morph($('co-detail'), g ? `<div class="panel-head co-top-head"><h3>${esc(g.label)}: largest traders</h3><button class="btn ghost" data-action="co-close">Close</button></div>${table({ id: 'co-top', compact: true, emptyText: 'No traders', columns: [
+      { key: 'a', label: 'Trader', render: a => addr(a.address, a.account) },
+      { key: 'n', label: 'Open notional', n: true, render: a => money(a.notional) },
       { key: 'd', label: 'Net exposure', n: true, render: a => netSide(a.net) },
-      { key: 'u', label: 'uPnL', phone: false, n: true, render: a => pnl(a.upnl) },
-      { key: 'p', label: 'Net PnL (history)', phone: false, n: true, render: a => (a.pnl === null ? '<span class="faint">—</span>' : pnl(a.pnl)) }
-    ], rows: g.top, rowAttrs: a => `class="link" data-href="/wallet/${esc(a.address || a.account)}"` })}` : '';
+      { key: 'u', label: 'Unrealized', phone: false, n: true, render: a => pnlShort(a.upnl) },
+      { key: 'p', label: 'Net PnL · all-time', phone: false, n: true, render: a => (a.pnl === null ? DASH : pnlShort(a.pnl)) }
+    ], rows: g.top, rowAttrs: a => `class="link" data-href="/wallet/${esc(a.address || a.account)}"` })}` : '');
   }
-  const loadCohorts = () => get('cohorts', { maxAge: 5000 }).then(c => { if (!alive) return; cohorts = c; renderCohorts(); }).catch(() => { if (!cohorts) $('cohorts').innerHTML = '<div class="empty-state">Live positions unavailable</div>'; });
+  let coSeq = 0;
+  const loadCohorts = ({ maxAge = 5000 } = {}) => { const asked = ++coSeq; return get('cohorts', { maxAge }).then(c => { if (!alive || asked !== coSeq) return; cohorts = c; renderCohorts(); }).catch(error => { if (alive && asked === coSeq && !cohorts) panelError($('cohorts'), error.message, () => loadCohorts()); }); };
   loadCohorts();
-  const coTimer = setInterval(loadCohorts, 10000);
-  loadMoves().catch(() => { $('moves').innerHTML = '<div class="empty-state">Unavailable</div>'; });
+  const coTimer = setInterval(loadCohorts, 10000); // live positions; also what heals a failed panel
+  loadMoves().catch(() => {});
   const smTimer = setInterval(() => loadMoves().catch(() => {}), 15000);
 
-  load().catch(error => { $('list').innerHTML = `<div class="empty-state">${esc(error.message)}</div>`; });
-  loadSummary().catch(() => { $('tkpis').innerHTML = ''; });
+  board();
+  summary();
+  // Reaches the network and draws in place: run after a cached open and whenever the
+  // stream or the API comes back. A panel in failure goes back to trying.
+  function refresh() {
+    if (data) load({ quiet: true, maxAge: 0 }).catch(() => {}); else board();
+    if (cardsShown) loadSummary({ quiet: true, maxAge: 0 }).catch(() => {}); else summary();
+    loadCohorts({ maxAge: 0 });
+    loadMoves({ maxAge: 0 }).catch(() => {});
+  }
   return {
-    onSeg(name, v) { if (name === 'smm') { smMin = v; $('sm-min').innerHTML = seg('smm', SM_SIZES, smMin); $('moves').innerHTML = skeleton(6); loadMoves().catch(() => {}); return; } if (name === 'smw') { smWin = v; $('sm-win').innerHTML = seg('smw', SM_WINDOWS, smWin); $('moves').innerHTML = skeleton(6); loadMoves().catch(() => {}); return; } if (name === 'co') { coTab = v; coSel = null; $('co-tabs').innerHTML = seg('co', CO_TABS, coTab); renderCohorts(); return; } if (name === 'window') setQuery({ window: v === '24h' ? null : v }); if (name === 'epoch') setQuery({ epoch: v || null, window: w === '24h' ? null : w }); if (name === 'by') setQuery({ by: v === 'pnl' ? null : v }); },
-    onAction(a, t) { if (a === 'co-pick') { coSel = coSel === t.dataset.key ? null : t.dataset.key; renderCohorts(); return; } if (a === 'co-close') { coSel = null; renderCohorts(); return; } if (a === 'next' && data && page + 1 < pages()) goTo(page + 1); if (a === 'prev' && page > 0) goTo(page - 1); },
-    update(q) { const nw = rollingOf(q), cardsChanged = nw !== w; w = nw; ep = epochOf(q); by = SORTS.some(([v]) => v === q.get('by')) ? q.get('by') : 'pnl'; page = 0; $('win').innerHTML = windowCtl(w); $('epochs').innerHTML = epochChips(ep); $('by').innerHTML = rankBy(by); load().catch(() => {}); if (cardsChanged) loadSummary().catch(() => {}); },
-    destroy() { alive = false; clearInterval(coTimer); clearInterval(smTimer); clearInterval(epochTimer); }
+    refresh,
+    onSeg(name, v) {
+      if (name === 'smm' && v !== smMin) { smMin = v; keepQuery({ smm: v === '1000' ? null : v }); morph($('sm-min'), named(seg('smm', SM_SIZES, smMin), 'Minimum size of a move')); loadMoves({ press: true }).catch(() => {}); }
+      if (name === 'smw' && v !== smWin) { smWin = v; keepQuery({ smw: v === '30d' ? null : v }); morph($('sm-win'), named(seg('smw', SM_WINDOWS, smWin), 'Rank leaders over')); loadMoves({ press: true }).catch(() => {}); }
+      if (name === 'co' && v !== coTab) { coTab = v; coSel = null; keepQuery({ co: v === 'size' ? null : v, cohort: null }); morph($('co-tabs'), seg('co', CO_TABS, coTab)); renderCohorts(); }
+      if (name === 'window' && (v !== w || ep)) setQuery({ window: v === '24h' ? null : v, epoch: null, page: null });
+      if (name === 'epoch' && (EPOCHS[v] ?? null) !== ep) setQuery({ epoch: v || null, window: w === '24h' ? null : w, page: null });
+      if (name === 'by' && v !== by) setQuery({ by: v === 'pnl' ? null : v, page: null });
+    },
+    onAction(a, t) {
+      if (a === 'co-pick') { coSel = coSel === t.dataset.key ? null : t.dataset.key; keepQuery({ cohort: coSel }); renderCohorts(); return; }
+      if (a === 'co-close') { coSel = null; keepQuery({ cohort: null }); renderCohorts(); return; }
+      if (a === 'next' && data && page + 1 < pages()) goTo(page + 1);
+      if (a === 'prev' && page > 0) goTo(page - 1);
+    },
+    update(q) {
+      const nw = rollingOf(q), cardsChanged = nw !== w;
+      w = nw; ep = epochOf(q); by = rankOf(q); page = pageOf(q);
+      morph($('win'), windowCtl(w));
+      morph($('by'), rankBy(by, ep, w));
+      $('csv').href = csvHref();
+      board();
+      if (cardsChanged) summary();
+    },
+    destroy() { alive = false; stopBoard(); stopSummary(); clearInterval(coTimer); clearInterval(smTimer); clearInterval(epochTimer); }
   };
 }
-export { mkt };
