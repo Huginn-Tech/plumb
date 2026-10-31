@@ -24,7 +24,7 @@ const failure = (status, code) => Object.assign(new Error(WORDS[code] ?? (status
 const STALE_CAP_MS = 600000;
 let staleOpen = false, staleUsed = false;
 export const openStale = () => { staleOpen = true; staleUsed = false; };
-export const closeStale = () => { staleOpen = false; return staleUsed; };
+export const closeStale = () => { const used = staleUsed; staleOpen = false; staleUsed = false; return used; };
 
 export async function get(path, { maxAge = 1500, signal } = {}) {
   const hit = cache.get(path);
