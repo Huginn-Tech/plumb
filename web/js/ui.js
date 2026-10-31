@@ -399,11 +399,14 @@ if (typeof document !== 'undefined') {
   };
   const hide = () => { on = null; pop.hidden = true; };
   const noted = t => t?.closest?.('[title]:not([title=""]), [data-tip]:not([data-tip=""])');
+  const mouse = matchMedia('(hover: hover)');
   document.addEventListener('mouseover', e => { const el = noted(e.target); if (el && el !== on) show(el); else if (!el && on) hide(); });
   document.addEventListener('mouseout', e => { if (!e.relatedTarget) hide(); });
-  document.addEventListener('focusin', e => { const el = noted(e.target); if (el) show(el); });
-  // relatedTarget: a tap that re-renders what it hit drops focus to nothing, and must not close its note.
-  document.addEventListener('focusout', e => { if (e.relatedTarget) hide(); });
+  // Focus moving on leaves no note behind whose element a re-render has taken.
+  document.addEventListener('focusin', e => { const el = noted(e.target); if (el) show(el); else if (on && !on.isConnected) hide(); });
+  // relatedTarget: on a touch screen a tap that re-renders what it hit drops focus to
+  // nothing, and must not close its note. With a mouse or keys the note goes with its element.
+  document.addEventListener('focusout', e => { if (e.relatedTarget || (mouse.matches && on?.contains(e.target))) hide(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
   // A tap on one of these toggles its note (the tap's own mouseover has just opened it);
   // a tap anywhere but on the open note's element closes it.
