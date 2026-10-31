@@ -1088,11 +1088,28 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 /* Only a message (no liquidations in the window): no reserved chart height. */
 .lq-chart .chart:has(> .empty-state) { height: auto; }
 .lq-feed-ctl { display: flex; gap: 10px; align-items: center; }
+/* The line under the title holds its place while the chart is on the way. */
+.lq-chart .desc { min-height: 18px; }
+@media (min-width: 641px) and (max-width: 860px) { .lq-chart .desc { min-height: 35px; } }
+@media (min-width: 641px) and (max-width: 800px) { .keep-delta.k4 .kpi-label { min-height: 36px; } }
+/* A page turn brings the feed's head up under the sticky bar. */
+.lq-feed { scroll-margin-top: 72px; }
+/* Eleven columns on a tablet: closer together, and the year gives way as it does on phones. */
+@media (max-width: 1100px) {
+  .lq-feed .t th, .lq-feed .t td { padding-left: 8px; padding-right: 8px; }
+  .lq-feed .yr { display: none; }
+}
+.lq-largest { text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
 @media (max-width: 640px) {
   .lq-chart .head-right { flex: 1 1 100%; justify-content: space-between; }
   .lq-chart .legend.dots { justify-content: flex-start; margin-top: 0; }
   .lq-feed-ctl { flex: 1 1 100%; flex-wrap: wrap; row-gap: 8px; }
-  .lq-feed-ctl .meta { flex: 1 1 100%; }
+  .lq-feed-ctl .meta { flex: 1 1 100%; min-height: 17.4px; }
+  /* Everything that wraps here has its place before it lands: a two-line card label, the key, the pager. */
+  .keep-delta.k4 .kpi:nth-child(-n+2) .kpi-label { min-height: 36px; }
+  .lq-chart > .panel-head { min-height: 119.1px; }
+  .lq-feed .panel-foot.pager:empty { min-height: 76.4px; }
+  .lq-feed { scroll-margin-top: 112px; }
 }
 
 /* Status: stage figures in the page's type scale; dividers follow the grid when it wraps. */
@@ -1126,6 +1143,68 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 
 /* ========== page: overview (overview.js) ========== */
 /* overview rules */
+/* Cards keep the line a change sits on when a period has none, so All does not shrink them. */
+.keep-delta .kpi-row { min-height: 37px; align-content: flex-start; }
+/* The top switch names what it drives. */
+.ov-switch { display: inline-flex; align-items: center; gap: 10px; }
+#win-for { color: var(--text-3); font-size: 12px; white-space: nowrap; }
+.section-note { margin-left: 8px; color: var(--text-3); font-size: 13px; letter-spacing: 0; }
+/* A whole card is one link. What has its own note stays above the link, so the note still opens. */
+.kpi-link { color: inherit; }
+.kpi-link::after { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit; }
+.kpi:has(.kpi-link) { transition: background 0.12s linear; }
+.kpi:has(.kpi-link:hover) { background: var(--surface-2); }
+.kpi:has(.kpi-link:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.kpi-link:focus-visible { outline: none; }
+.kpi:has(.kpi-link) .delta, .kpi:has(.kpi-link) .kpi-basis, .kpi:has(.kpi-link) .kpi-note [title], .kpi:has(.kpi-link) .kpi-note [data-tip] { position: relative; z-index: 2; }
+/* A note's amount shows its exact figure on hover, without the mark a definition carries. */
+.kpi-note .amt[data-tip], .head-value .hn .amt[data-tip] { cursor: default; text-decoration: none; }
+/* The whole market cell opens the market; the rest of the row opens the wallet. */
+td.mkt-cell { position: relative; }
+.mkt-cell a.mkt::after { content: ''; position: absolute; inset: 0; }
+/* Rows that pick a period look like the rows beside them until the pointer is on them. */
+#windows td a:hover { color: var(--accent); }
+/* Eight whole rows beside the chart: the chart is as tall as they need, and the foot
+   has the speed note's height before it lands, so the list never loses a row. */
+.ov-tape-foot { min-height: 47px; }
+@media (min-width: 1101px) { #main-chart { height: 310px; } }
+/* Top in and Top out can run short on a quiet period; the list keeps its height. */
+#flowlist { min-height: 338px; }
+/* The row of keys has room for the period length switch, shown on 30D and All. */
+.panel-head.vol-keys { min-height: 42px; }
+/* By period: two lines beside rows of one, all on the row's middle. Each of its rows is two of its neighbours'. */
+#windows .t td { vertical-align: middle; }
+/* Keys and sources take more lines on narrow screens: their place is kept before they land. */
+@media (min-width: 1101px) and (max-width: 1260px) {
+  .panel-head.vol-keys { min-height: 61px; }
+  #main-chart { height: 291px; }
+  .ov-main { grid-template-columns: minmax(0, 1fr) 410px; }
+  .ov-lists { grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr) minmax(0, 1fr); }
+  .ov-lists .t th, .ov-lists .t td { padding-left: 6px; padding-right: 6px; }
+  .ov-lists .t th:first-child, .ov-lists .t td:first-child { padding-left: 18px; }
+  .ov-lists .t th:last-child, .ov-lists .t td:last-child { padding-right: 18px; }
+}
+@media (min-width: 1101px) and (max-width: 1140px) { .keep-delta:not(.k4) .kpi-row { min-height: 54px; } }
+@media (min-width: 1000px) and (max-width: 1140px) { #fees-v, #liq-v, #taker-v { min-height: 71px; } }
+@media (min-width: 641px) and (max-width: 999px) { #liq-lg:empty { display: block; min-height: 38.8px; } }
+@media (max-width: 860px) { .panel-head.vol-keys { min-height: 61px; } }
+/* Stacked, the list takes its height from its rows: it keeps it, however few trades the size filter leaves. */
+@media (max-width: 1100px) { #tape { min-height: 452px; } }
+@media (max-width: 640px) {
+  .panel-head.vol-keys { min-height: 102px; }
+  #flows-lg:empty, #traders-lg:empty, #taker-lg:empty { display: block; min-height: 17.4px; }
+  #liq-lg:empty, #fees-lg:empty { display: block; }
+  #liq-lg, #fees-lg { min-height: 38.8px; }
+  #landscape-grid .panel-head { min-height: 98px; }
+  /* TVL's and Fees' notes take a second line on longer periods. */
+  .keep-delta:not(.k4) .kpi:nth-child(3) .kpi-row, .keep-delta:not(.k4) .kpi:nth-child(4) .kpi-row { min-height: 54px; }
+}
+@media (max-width: 380px) {
+  .panel-head.vol-keys { min-height: 129px; }
+  .keep-delta .kpi:nth-child(n+5) .kpi-label, .keep-delta.k4 .kpi .kpi-label { min-height: 36px; }
+}
+/* A card that could not load keeps the look of the cards. */
+.kpis > .panel-error { background: var(--surface); border-radius: var(--radius); box-shadow: var(--card-edge); }
 /* ========== end page: overview ========== */
 
 /* A second line shown only on phones, where its own column hides. */
