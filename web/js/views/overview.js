@@ -30,6 +30,7 @@ const when = ts => `<span class="muted" title="${esc(dateTime(ts))} UTC">${ago(t
 const withWindow = (path, win, home = DEFAULT_WINDOW) => (win === home ? path : `${path}?window=${win}`);
 const liqPage = win => withWindow('/liquidations', win, '30d');
 // A whole card is the link: the anchor sits on the figure, and stretches over the card in CSS.
+const newAccounts = n => `${int(n)} new ${num(n) === 1 ? 'account' : 'accounts'}`;
 const cardLink = (name, value, href, page) => `<a class="kpi-link" href="${esc(href)}" aria-label="${esc(`${name} ${value}, open ${page}`)}">${value}</a>`;
 // A skeleton or an error gives way to the table: patched over, its inline height would stay on the table's wrapper.
 const fill = (node, html) => { node.querySelector(':scope > .sk-rows, :scope > .panel-error')?.remove(); morph(node, html); };
@@ -204,8 +205,8 @@ export function mount(el, { query, setQuery }) {
       kpi({ label: 'Open interest', value: cardLink('Open interest', usd(c?.open_interest), withWindow('/markets', win), 'Markets'), delta: seriesChange('open_interest'), ...within, note: c ? `${int(c.positions)} open positions` : '', spark: 'sp-oi' }),
       kpi({ label: 'TVL', value: cardLink('TVL', usd(c?.tvl), '/status', 'Status'), delta: seriesChange('tvl'), ...within, note: `${amt(h.net_flow.value, { sign: true })} net flow · ${wl}`, spark: 'sp-tvl' }),
       kpi({ label: `Fees · ${wl}`, value: cardLink('Fees', usd(h.fees.value), withWindow('/markets', win), 'Markets'), delta: ch(h.fees.change_pct), ...vsPrev, note: h.protocol_revenue ? `<span data-tip="The protocol's share of fees (${usdFull(h.protocol_fees?.value)}) plus its share of liquidations (${usdFull(h.revenue?.protocol?.liquidations)})">${usdShort(h.protocol_revenue.value)} protocol revenue</span>` : '', spark: 'sp-fees' }),
-      act ? kpi({ label: 'Active traders · 30d', value: cardLink('Active traders', int(act.p.headline.traders.value), withWindow('/traders', '30d'), 'Traders'), note: `${int(act.p.headline.new_accounts.value)} new accounts`, spark: 'sp-tr' })
-        : kpi({ label: `Active traders · ${wl}`, value: cardLink('Active traders', int(h.traders.value), withWindow('/traders', win), 'Traders'), delta: ch(h.traders.change_pct), ...vsPrev, note: `${int(h.new_accounts.value)} new accounts`, spark: 'sp-tr' }),
+      act ? kpi({ label: 'Active traders · 30d', value: cardLink('Active traders', int(act.p.headline.traders.value), withWindow('/traders', '30d'), 'Traders'), note: newAccounts(act.p.headline.new_accounts.value), spark: 'sp-tr' })
+        : kpi({ label: `Active traders · ${wl}`, value: cardLink('Active traders', int(h.traders.value), withWindow('/traders', win), 'Traders'), delta: ch(h.traders.change_pct), ...vsPrev, note: newAccounts(h.new_accounts.value), spark: 'sp-tr' }),
       kpi({ label: `Liquidated · ${wl}`, value: cardLink('Liquidated', usd(h.liquidated.value), liqPage(win), 'Liquidations'), delta: ch(h.liquidated.change_pct), ...vsPrev, invert: true, note: `${int(h.liquidations.value)} ${num(h.liquidations.value) === 1 ? 'liquidation' : 'liquidations'}`, spark: 'sp-liq' })
     ].join(''));
     spark('sp-vol', pts.map(p => num(p.volume)));
