@@ -108,7 +108,7 @@ async function route(queryOnly = false, y = 0) {
   const hit = routes.find(([re]) => re.test(path));
   markSection(path);
   setTitle(path);
-  if (!hit) { leavePage(); leaving = false; view.innerHTML = '<div class="page-head"><div><h1>Page not found</h1></div></div><div class="empty-state"><a href="/">Back to overview</a></div>'; window.scrollTo({ top: 0 }); return; }
+  if (!hit) { leavePage(); leaving = false; view.innerHTML = '<div class="page-head"><div><h1>Page not found</h1><div class="sub"><a href="/">Back to overview</a></div></div></div>'; window.scrollTo({ top: 0 }); return; }
   const params = path.match(hit[0]).slice(1);
   const key = `${hit[0]}:${params.join('/')}`;
   if (queryOnly && current?.key === key && current.instance?.update) { current.instance.update(query); return; }
