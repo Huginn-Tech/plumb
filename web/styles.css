@@ -649,6 +649,97 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .m-price .chart:has(> .empty-state) { min-height: 0; contain: none; }
 /* A small unit after a head figure ("in profit", "per 8h"). */
 .head-value .m-unit { margin-left: 6px; font-size: 13px; color: var(--text-3); letter-spacing: 0; }
+/* Markets table: 44px rows and tight cells, so all fourteen columns fit from 1280. */
+.markets-list .t:has(td div.sub) td { height: 44px; padding-top: 4px; padding-bottom: 4px; }
+.markets-list .t td .ratio-wrap { margin-top: 5px; gap: 2px; }
+.markets-list .ratio-wrap .lbl { line-height: 14px; }
+.markets-list .t th { white-space: normal; line-height: 15px; }
+@media (min-width: 641px) {
+  .markets-list .t th, .markets-list .t td { padding-left: 8px; padding-right: 8px; }
+  .markets-list .t th:first-child, .markets-list .t td:first-child { padding-left: 18px; }
+  .markets-list .t th:last-child, .markets-list .t td:last-child { padding-right: 18px; }
+}
+@media (max-width: 640px) {
+  .markets-list .t th:first-child, .markets-list .t td:first-child { padding-left: 14px; }
+  .markets-list .t th:last-child, .markets-list .t td:last-child { padding-right: 14px; }
+}
+/* Low and High side by side where they fit, one over the other where not. */
+.markets-list .t td .lh { display: inline; }
+@media (max-width: 1423px) {
+  .markets-list .t td .lh { display: block; line-height: 16px; }
+  .markets-list .t td .lh-sep { display: none; }
+}
+/* Recent trades in the half-width column at 1000-1100: 6 px over without this. */
+@media (min-width: 1000px) and (max-width: 1100px) {
+  #trades .t th, #trades .t td { padding-left: 8px; padding-right: 8px; }
+  #trades .t th:first-child, #trades .t td:first-child { padding-left: 14px; }
+  #trades .t th:last-child, #trades .t td:last-child { padding-right: 14px; }
+}
+/* Order book: each side keeps room for its twelve levels, asks against the mid line,
+   so the line holds still as levels come and go. Twenty-four px a row. */
+.book-side { display: flex; flex-direction: column; min-height: 288px; }
+.book-side.ask { justify-content: flex-end; }
+/* Positioning: what the bar counts, and the small heading over the cost table. */
+.m-split { padding-top: 4px; padding-bottom: 14px; }
+.m-split-label { font-size: 12px; color: var(--text-3); }
+.m-split .ratio-wrap { margin-top: 6px; }
+.m-subhead { min-height: 0; padding-top: 14px; }
+.m-subhead h2 { font-size: 13px; color: var(--text-2); }
+.stat .info-tip { margin-left: 4px; vertical-align: -2px; }
+/* Taller by 4 px, so the book panel ends just past a whole row of Recent trades beside it. */
+.book { padding-bottom: 12px; }
+/* A market with no positions: the dash sits in the middle of its column, away from the cost dash on its left. */
+.markets-list .t td .ls-none { display: block; text-align: center; }
+/* KPI notes that wrap on two lines in one market and one in another: the row keeps the room for two. */
+@media (min-width: 1101px) and (max-width: 1359px) { .m-kpis .kpi-row { min-height: 35px; } }
+@media (max-width: 640px) { .m-kpis .kpi:nth-child(n+3) .kpi-row { min-height: 35px; } }
+/* Two chart heads side by side: the key wraps, and the title and its note keep one line. */
+@media (min-width: 1101px) and (max-width: 1423px) {
+  .m-kpis ~ .g-2 > .panel.trend .trend-id { flex: 0 0 auto; max-width: calc(100% - 222px); }
+  .m-kpis ~ .g-2 > .panel.trend .trend-side { flex: 1 1 0; min-width: 0; }
+}
+/* Recent trades scrolls in its panel: the panel is the scroller, so the head stays on top. */
+#trades .table-wrap { overflow: visible; mask-image: none; }
+#trades { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.16) transparent; }
+/* The title holds the height the logo gives it. On a phone the window switch sits under
+   the subtitle from the first frame, and heads that grow when their figures and key land
+   hold that room while the chart is a skeleton. */
+#title { min-height: 43px; }
+@media (max-width: 640px) {
+  .page-head:has(#subtitle) > div:first-child { flex-basis: 100%; }
+  .m-price:has(.chart > .skeleton) > .panel-head { min-height: 192px; }
+  .m-kpis ~ .g-2 > .panel.trend:has(.chart > .skeleton) > .panel-head { min-height: 170px; }
+  .panel.trend:has(#flow > .skeleton) > .panel-head { min-height: 191px; }
+  .panel:has(#book > .skeleton) .meta:empty { min-height: 17px; }
+  .m-price:has(#lvl-toggle:not([hidden])) .legend.dots:empty { display: block; min-height: 17px; } /* the key's row stays when levels are off */
+}
+/* The funding note fills in with the data, and on narrow screens pushes the tools under it. */
+@media (max-width: 860px) { .panel:has(#funding-map > .skeleton) > .panel-head { min-height: 85px; } }
+@media (max-width: 640px) { .panel:has(#funding-map > .skeleton) > .panel-head { min-height: 121px; } }
+@media (max-width: 480px) { .panel:has(#funding-map > .skeleton) > .panel-head { min-height: 138px; } }
+/* Narrow desktops: the three-line key and the wrapped notes, held while the charts load;
+   the list's sideways scrollbar likewise. */
+@media (min-width: 1000px) and (max-width: 1199px) { .m-kpis ~ .g-2 > .panel.trend:has(#funding > .skeleton, #ladder > .skeleton, #entries > .skeleton) > .panel-head { min-height: 125px; } }
+@media (min-width: 641px) and (max-width: 1199px) { #list:has(> .sk-rows) { min-height: 797px; } }
+/* The read age stays on one line; the description beside it wraps first. */
+@media (min-width: 641px) { #book-meta { flex: none; } }
+/* Position flow writes its note out in full: the key takes a fixed three rows, so the head
+   keeps one height whatever the window's figures, and the note has the rest of the width. */
+@media (min-width: 641px) {
+  .panel.trend:has(#flow) .trend-side { flex: 0 0 222px; }
+  .panel.trend:has(#flow) .trend-id { flex: 1 1 0; max-width: none; }
+  .panel.trend:has(#flow > .skeleton) > .panel-head { min-height: 130px; }
+}
+/* Small phones: the note and the key each take a row more. */
+@media (max-width: 380px) {
+  .m-kpis ~ .g-2 > .panel.trend:has(.chart > .skeleton) > .panel-head { min-height: 187px; }
+  .panel.trend:has(#flow > .skeleton) > .panel-head { min-height: 229px; }
+}
+/* Where the list scrolls sideways its column heads need not wrap. */
+@media (min-width: 641px) and (max-width: 1199px) { .markets-list .t th { white-space: nowrap; } }
+/* Just above 1000 the funding note takes a third line, and the book note a second. */
+@media (min-width: 1000px) and (max-width: 1040px) { .m-kpis ~ .g-2 > .panel.trend:has(#funding > .skeleton, #ladder > .skeleton) > .panel-head { min-height: 143px; } }
+@media (min-width: 1000px) and (max-width: 1100px) { .panel:has(#book > .skeleton) > .panel-head { min-height: 85px; } }
 /* ========== end page: markets ========== */
 
 /* ========== page: traders (traders.js, wallet.js, compare.js) ========== */
