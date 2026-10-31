@@ -4,7 +4,7 @@
 import { usd, compact, dateTime, date, num, esc } from './format.js';
 
 const T = {
-  text: 'rgba(224,225,255,0.70)', faint: 'rgba(255,255,255,0.5)', grid: 'rgba(255,255,255,0.045)', axis: 'rgba(255,255,255,0.10)',
+  text: 'rgba(232,233,255,0.80)', faint: 'rgba(232,233,255,0.64)', grid: 'rgba(255,255,255,0.045)', axis: 'rgba(255,255,255,0.10)',
   accent: '#a2a4ff', long: '#81c784', short: '#f65a6e', tooltip: '#1c1b20', border: 'rgba(255,255,255,0.10)', surface: '#121113', font: 'Geist, ui-sans-serif, system-ui, sans-serif'
 };
 export const COLORS = T;
@@ -135,7 +135,7 @@ function labelAt(el, times, bucketSeconds) {
   return v => {
     if (el.clientWidth !== width) {
       width = el.clientWidth;
-      const slot = (width - 60) / Math.max(1, times.length), need = textWidth('Sep 30', 10.5) + 16; // 60: about the value axis; 16: the gap between labels
+      const slot = (width - 60) / Math.max(1, times.length), need = textWidth('Sep 30') + 16; // 60: about the value axis; 16: the gap between labels
       step = HOUR_STEPS.find(s => s % bucketSeconds === 0 && s / bucketSeconds * slot >= need) ?? 86400;
     }
     return Number(v) % step === 0;
@@ -147,10 +147,10 @@ const timeAxis = (times, bucketSeconds, el) => {
     type: 'category', data: times, boundaryGap: true,
     axisLine: { show: false }, axisTick: { show: false },
     axisLabel: {
-      color: T.faint, hideOverlap: true, margin: 12, fontSize: 10.5,
+      color: T.faint, hideOverlap: true, margin: 12, fontSize: 11,
       ...(at ? { interval: (i, v) => at(v) } : {}),
       formatter: v => { const t = timeLabel(v, bucketSeconds); return bucketSeconds < 86400 && midnight(v) ? `{d|${t}}` : t; },
-      rich: { d: { color: 'rgba(255,255,255,0.78)', fontWeight: 500, fontSize: 10.5 } }
+      rich: { d: { color: 'rgba(255,255,255,0.78)', fontWeight: 500, fontSize: 11 } }
     }
   };
 };
@@ -165,7 +165,7 @@ function fitRight(chart, el, times, bucketSeconds, { right = 8, at: fixed, line 
     const at = fixed ?? (labelled ? times.findLastIndex(labelled) : times.length - 1);
     if (at < 0) return right;
     const slot = (el.clientWidth - 44 - right) / Math.max(1, times.length - (line ? 1 : 0)); // 44: about the value axis and its labels
-    const overhang = textWidth(timeLabel(times[at], bucketSeconds), 10.5) / 2 + 1 - (times.length - 1 - at + (line ? 0 : 0.5)) * slot;
+    const overhang = textWidth(timeLabel(times[at], bucketSeconds)) / 2 + 1 - (times.length - 1 - at + (line ? 0 : 0.5)) * slot;
     return Math.max(right, Math.ceil(overhang));
   };
   chart.__refit = () => { const r = fit(); if (r !== chart.__right) { chart.__right = r; chart.setOption({ grid: chart.getOption().grid.map(() => ({ right: r })) }); } };
@@ -176,7 +176,7 @@ const niceCeil = (v, steps = [1, 2, 2.5, 5, 10]) => { const p = 10 ** Math.floor
 // Axis money: $1.5M, $900K, $0.
 export const usdAxis = v => { const n = Number(v); if (!n) return '$0'; const a = Math.abs(n); const [k, u] = a >= 1e9 ? [1e9, 'B'] : a >= 1e6 ? [1e6, 'M'] : a >= 1e3 ? [1e3, 'K'] : [1, '']; const x = a / k; return `${n < 0 ? '-' : ''}$${x >= 100 || Number.isInteger(x) ? Math.round(x) : x.toFixed(1).replace(/\.0$/, '')}${u}`; };
 const SPLIT = { lineStyle: { color: T.grid, type: [3, 4] } };
-const valueAxis = fmt => ({ type: 'value', splitNumber: 3, axisLabel: { color: T.faint, formatter: fmt, margin: 10, fontSize: 10.5 }, splitLine: SPLIT, axisLine: { show: false }, axisTick: { show: false } });
+const valueAxis = fmt => ({ type: 'value', splitNumber: 3, axisLabel: { color: T.faint, formatter: fmt, margin: 10, fontSize: 11 }, splitLine: SPLIT, axisLine: { show: false }, axisTick: { show: false } });
 // Tooltip rows carry the same dot as the legends.
 const row = (color, name, value) => `<div style="display:flex;justify-content:space-between;gap:18px;line-height:1.7"><span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-right:7px;vertical-align:1px"></span>${esc(name)}</span><b style="font-weight:500;font-variant-numeric:tabular-nums">${value}</b></div>`;
 // Rounds the outer end of each stack: per bucket, the last shown series with a value there.
@@ -238,7 +238,7 @@ const zoomOf = chart => { const z = chart.getOption()?.dataZoom?.[0]; return z &
 function zoomOptions(xAxisIndex = 0, kept = null) {
   return [
     { type: 'inside', xAxisIndex, zoomOnMouseWheel: 'shift', moveOnMouseMove: false, ...kept },
-    { type: 'slider', xAxisIndex, ...kept, height: 16, bottom: 4, borderColor: T.axis, backgroundColor: 'rgba(255,255,255,0.02)', fillerColor: 'rgba(162,164,255,0.12)', dataBackground: { lineStyle: { color: 'rgba(162,164,255,0.35)' }, areaStyle: { color: 'rgba(162,164,255,0.08)' } }, selectedDataBackground: { lineStyle: { color: T.accent }, areaStyle: { color: 'rgba(162,164,255,0.18)' } }, handleStyle: { color: '#24222a', borderColor: T.accent }, moveHandleSize: 0, textStyle: { color: T.faint, fontSize: 10 }, labelFormatter: () => '', brushSelect: false }
+    { type: 'slider', xAxisIndex, ...kept, height: 16, bottom: 4, borderColor: T.axis, backgroundColor: 'rgba(255,255,255,0.02)', fillerColor: 'rgba(162,164,255,0.12)', dataBackground: { lineStyle: { color: 'rgba(162,164,255,0.35)' }, areaStyle: { color: 'rgba(162,164,255,0.08)' } }, selectedDataBackground: { lineStyle: { color: T.accent }, areaStyle: { color: 'rgba(162,164,255,0.18)' } }, handleStyle: { color: '#24222a', borderColor: T.accent }, moveHandleSize: 0, textStyle: { color: T.faint, fontSize: 11 }, labelFormatter: () => '', brushSelect: false }
   ];
 }
 
@@ -408,7 +408,7 @@ function candlesNow(el, { times, ohlc, volume, bucketSeconds, priceFmt, volColor
   // off the axis (0.02605 to 0.03), and it would not be drawn.
   const markLine = labelled.length ? {
     symbol: 'none', silent: true, precision: 10, lineStyle: { color: 'transparent' },
-    data: labelled.map(b => ({ yAxis: (b.lo + b.hi) / 2, label: { position: 'insideStart', distance: 4, color: b.side === 'long' ? T.long : T.short, fontSize: 10.5, backgroundColor: 'rgba(18,17,19,0.8)', padding: [2, 5], borderRadius: 4, formatter: () => `liq ${usd(b.n)}` } }))
+    data: labelled.map(b => ({ yAxis: (b.lo + b.hi) / 2, label: { position: 'insideStart', distance: 4, color: b.side === 'long' ? T.long : T.short, fontSize: 11, backgroundColor: 'rgba(18,17,19,0.8)', padding: [2, 5], borderRadius: 4, formatter: () => `liq ${usd(b.n)}` } }))
   } : undefined;
   // Volume ticks at zero, half and a round top that the busiest bar in view nearly reaches.
   const volAxis = (from = 0, to = volume.length - 1) => { const top = niceCeil(Math.max(1, ...volume.slice(from, to + 1).map(v => num(v) ?? 0)), [1, 1.5, 2, 3, 4, 5, 6, 8, 10]); return { min: 0, max: top, interval: top / 2 }; };
@@ -473,7 +473,7 @@ function mirroredNow(el, { labels, long, short, fmt = v => usd(v), legend = true
     ...base(), grid: { left: 8, right: 28, top: legend ? below() : 8, bottom: 6, containLabel: true },
     legend: { show: legend, top: 0, right: 0, icon: 'circle', itemWidth: 7, itemHeight: 7, itemGap: 14, textStyle: { color: T.text, fontSize: 11 }, data: [longName, shortName] },
     // Symmetric around zero so both sides read on the same scale.
-    xAxis: { type: 'value', min: -edge, max: edge, axisLabel: { color: T.faint, fontSize: 10.5, hideOverlap: true, showMinLabel: false, showMaxLabel: false, formatter: v => usdAxis(Math.abs(v)) }, splitLine: SPLIT },
+    xAxis: { type: 'value', min: -edge, max: edge, axisLabel: { color: T.faint, fontSize: 11, hideOverlap: true, showMinLabel: false, showMaxLabel: false, formatter: v => usdAxis(Math.abs(v)) }, splitLine: SPLIT },
     yAxis: { type: 'category', data: labels, inverse: true, axisTick: { show: false }, axisLine: { lineStyle: { color: T.axis } }, axisLabel: { color: T.text } },
     tooltip: { ...base().tooltip, trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: ps => `<div style="color:${T.faint};margin-bottom:4px">Price moves ${ps[0].axisValue}</div>` + ps.map(p => row(p.color, p.seriesName, fmt(Math.abs(p.value)))).join('') },
     series: [
@@ -524,8 +524,8 @@ function entryProfileNow(el, { bins, mark, priceFmt = v => String(v), fmt = v =>
   const edge = niceCeil(peak * 1.05);
   chart.setOption({
     ...base(), grid: { left: 8, right: 20, top: 8, bottom: 6, containLabel: true },
-    xAxis: { type: 'value', min: -edge, max: edge, axisLabel: { color: T.faint, fontSize: 10.5, hideOverlap: true, showMinLabel: false, showMaxLabel: false, formatter: v => usdAxis(Math.abs(v)) }, splitLine: SPLIT },
-    yAxis: { type: 'category', data: labels, axisTick: { show: false }, axisLine: { lineStyle: { color: T.axis } }, axisLabel: { color: T.faint, fontSize: 10.5, hideOverlap: true, interval: i => i % 4 === 0 || Boolean(bins[i]?.edge) } }, // the mark has its own line label
+    xAxis: { type: 'value', min: -edge, max: edge, axisLabel: { color: T.faint, fontSize: 11, hideOverlap: true, showMinLabel: false, showMaxLabel: false, formatter: v => usdAxis(Math.abs(v)) }, splitLine: SPLIT },
+    yAxis: { type: 'category', data: labels, axisTick: { show: false }, axisLine: { lineStyle: { color: T.axis } }, axisLabel: { color: T.faint, fontSize: 11, hideOverlap: true, interval: i => i % 4 === 0 || Boolean(bins[i]?.edge) } }, // the mark has its own line label
     tooltip: { ...base().tooltip, trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: ps => { const b = bins[ps[0].dataIndex]; const range = b.edge === 'below' ? `below ${priceFmt(b.hi)}` : b.edge === 'above' ? `above ${priceFmt(b.lo)}` : `${priceFmt(b.lo)} – ${priceFmt(b.hi)}`; return `<div style="color:${T.faint};margin-bottom:4px">Entry ${range}</div>${row(T.long, `Longs · ${b.long_count}`, fmt(b.long))}${row(T.short, `Shorts · ${b.short_count}`, fmt(b.short))}`; } },
     series: [
       { name: 'Longs', type: 'bar', stack: 'x', data: bins.map(b => num(b.long) ?? 0), itemStyle: { color: T.long, borderRadius: [0, 3, 3, 0] }, barCategoryGap: '20%',
