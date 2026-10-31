@@ -204,7 +204,7 @@ export function mount(el, { query, setQuery }) {
       kpi({ label: `Volume · ${wl}`, value: cardLink('Volume', usd(h.volume.value), withWindow('/markets', win), 'Markets'), delta: ch(h.volume.change_pct), ...vsPrev, note: `${int(data.markets.reduce((a, m) => a + (m.fills ?? 0), 0))} trades${partial}`, spark: 'sp-vol' }),
       kpi({ label: 'Open interest', value: cardLink('Open interest', usd(c?.open_interest), withWindow('/markets', win), 'Markets'), delta: seriesChange('open_interest'), ...within, note: c ? `${int(c.positions)} open positions` : '', spark: 'sp-oi' }),
       kpi({ label: 'TVL', value: cardLink('TVL', usd(c?.tvl), '/status', 'Status'), delta: seriesChange('tvl'), ...within, note: `${amt(h.net_flow.value, { sign: true })} net flow · ${wl}`, spark: 'sp-tvl' }),
-      kpi({ label: `Fees · ${wl}`, value: cardLink('Fees', usd(h.fees.value), withWindow('/markets', win), 'Markets'), delta: ch(h.fees.change_pct), ...vsPrev, note: h.protocol_revenue ? `<span data-tip="The protocol's share of fees (${usdFull(h.protocol_fees?.value)}) plus its share of liquidations (${usdFull(h.revenue?.protocol?.liquidations)})">${usdShort(h.protocol_revenue.value)} protocol revenue</span>` : '', spark: 'sp-fees' }),
+      kpi({ label: `Fees · ${wl}`, value: cardLink('Fees', usd(h.fees.value), withWindow('/markets', win), 'Markets'), delta: ch(h.fees.change_pct), ...vsPrev, note: h.protocol_revenue ? `<span tabindex="0" data-tip="The protocol's share of fees (${usdFull(h.protocol_fees?.value)}) plus its share of liquidations (${usdFull(h.revenue?.protocol?.liquidations)})">${usdShort(h.protocol_revenue.value)} protocol revenue</span>` : '', spark: 'sp-fees' }),
       act ? kpi({ label: 'Active traders · 30d', value: cardLink('Active traders', int(act.p.headline.traders.value), withWindow('/traders', '30d'), 'Traders'), note: newAccounts(act.p.headline.new_accounts.value), spark: 'sp-tr' })
         : kpi({ label: `Active traders · ${wl}`, value: cardLink('Active traders', int(h.traders.value), withWindow('/traders', win), 'Traders'), delta: ch(h.traders.change_pct), ...vsPrev, note: newAccounts(h.new_accounts.value), spark: 'sp-tr' }),
       kpi({ label: `Liquidated · ${wl}`, value: cardLink('Liquidated', usd(h.liquidated.value), liqPage(win), 'Liquidations'), delta: ch(h.liquidated.change_pct), ...vsPrev, invert: true, note: `${int(h.liquidations.value)} ${num(h.liquidations.value) === 1 ? 'liquidation' : 'liquidations'}`, spark: 'sp-liq' })
@@ -316,7 +316,7 @@ export function mount(el, { query, setQuery }) {
         break;
       case 'fees':
         // Payouts from the protocol to trader accounts show on hover over its share.
-        const paid = num(h.protocol_payouts?.value) > 0 ? `<span data-tip="${usdFull(h.protocol_payouts.value)} paid from the protocol to trader accounts">${usdShort(h.protocol_fees.value)} protocol</span>` : `${amt(h.protocol_fees.value)} protocol`;
+        const paid = num(h.protocol_payouts?.value) > 0 ? `<span tabindex="0" data-tip="${usdFull(h.protocol_payouts.value)} paid from the protocol to trader accounts">${usdShort(h.protocol_fees.value)} protocol</span>` : `${amt(h.protocol_fees.value)} protocol`;
         headValue('fees', usd(h.fees.value), `${paid} · ${amt(h.insurance_fees.value)} insurance · ${winLabel(win)}`);
         renderFees();
         break;
