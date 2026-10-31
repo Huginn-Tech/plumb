@@ -735,6 +735,11 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
   .m-kpis ~ .g-2 > .panel.trend:has(.chart > .skeleton) > .panel-head { min-height: 187px; }
   .panel.trend:has(#flow > .skeleton) > .panel-head { min-height: 229px; }
 }
+/* Where the list scrolls sideways its column heads need not wrap. */
+@media (min-width: 641px) and (max-width: 1199px) { .markets-list .t th { white-space: nowrap; } }
+/* Just above 1000 the funding note takes a third line, and the book note a second. */
+@media (min-width: 1000px) and (max-width: 1040px) { .m-kpis ~ .g-2 > .panel.trend:has(#funding > .skeleton, #ladder > .skeleton) > .panel-head { min-height: 143px; } }
+@media (min-width: 1000px) and (max-width: 1100px) { .panel:has(#book > .skeleton) > .panel-head { min-height: 85px; } }
 /* ========== end page: markets ========== */
 
 /* ========== page: traders (traders.js, wallet.js, compare.js) ========== */

@@ -40,7 +40,7 @@ export function mount(el, { query, setQuery, keepQuery }) {
   const lev = v => (v ? `${v.toFixed(1)}x` : DASH);
   const COLS = [
     { key: 'symbol', label: 'Market', sort: r => r.symbol, render: r => `${mkt(r.id, r.symbol, r.name && r.name !== r.symbol && r.name !== `${r.symbol} Perp` ? r.name : null, { link: true })}${idle(r) ? ` <span class="tag" title="${idleTitle(r)}">${idleTag(r)}</span>` : ''}` },
-    { key: 'mark', label: 'Mark', tip: 'Contract mark price, used for unrealized PnL and liquidation', n: true, sort: r => num(r.mark ?? r.close), render: r => `${price(r.mark ?? r.close, dpOf(r.mark ?? r.close))}<div class="sub-sm">${pctCell(r.change_pct)}</div>` },
+    { key: 'mark', label: 'Mark', tip: 'Contract mark price, used for unrealized PnL and liquidation', n: true, sort: r => num(r.mark ?? r.close), render: r => `${price(r.mark ?? r.close, dpOf(r.mark ?? r.close))}${num(r.change_pct) === null ? '' : `<div class="sub-sm">${pctCell(r.change_pct)}</div>`}` },
     { key: 'change_pct', label: 'Change', tip: 'Change in price over the selected period', phone: false, n: true, sort: r => num(r.change_pct) ?? -1e9, render: r => pctCell(r.change_pct) },
     { key: 'range', label: 'Low – High', tip: 'Lowest and highest trade price in the selected period', phone: false, n: true, render: r => (r.low ? `<span class="muted"><span class="lh">${price(r.low, dpOf(r.low))}</span><span class="lh-sep"> – </span><span class="lh">${price(r.high, dpOf(r.high))}</span></span>` : DASH) },
     { key: 'volume', label: 'Volume', tip: 'Notional traded in the selected period, each trade counted once', phone: false, n: true, sort: r => num(r.volume), render: r => amount(r.volume) },
