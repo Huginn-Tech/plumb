@@ -831,6 +831,57 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
   .cmp thead .sub { order: 1; }
   .cmp thead .icon-btn { order: 2; margin-left: auto; }
 }
+/* Wallet and Compare: type on the system scale. */
+.cmp-card header a { font-size: 13px; }
+.cmp-big { font-size: 28px; }
+.cmp-facts dt { font-size: 12px; }
+.cmp-facts dd { font-size: 13px; }
+.cmp thead th { font-size: 13px; }
+/* Compare: the best-value dot outside the digits; phones keep theirs. */
+@media (min-width: 641px) {
+  .cmp td:not(.cmp-m) { position: relative; padding-right: 32px; }
+  .cmp th:not(.cmp-m) { padding-right: 32px; }
+  .cmp td.cmp-best::after { position: absolute; right: 18px; top: 50%; margin: -3px 0 0; }
+}
+#table.cmp-fail { min-height: 240px; display: grid; }
+/* Wallet: the page stands before its answers land. */
+#pos-slot:empty { display: none; }
+#kpi-row { display: grid; min-height: 137px; }
+@media (max-width: 1100px) { #kpi-row { min-height: 288px; } }
+@media (max-width: 860px) { #kpi-row { min-height: 425px; } }
+@media (max-width: 640px) { #kpi-row { min-height: 555px; } }
+@media (max-width: 640px) { #w-head .page-head { min-height: 191px; } }
+/* Behaviour: the hour map takes what the row leaves, so the panel has no blank foot. */
+#insights { flex: 1; display: flex; flex-direction: column; }
+#insights > .panel-body { flex: 1; display: flex; }
+#insights .heat { flex: 1; grid-template-rows: repeat(7, minmax(14px, 1fr)) auto; }
+#insights .heat i { height: auto; }
+.wallet-page .g-2 > .panel:has(#insights) { display: flex; flex-direction: column; }
+.wallet-page .panel > .sk-box, .wallet-page #perf > .sk-box, .wallet-page #insights > .sk-box { border-radius: var(--radius); }
+.w-sk-sub { width: min(420px, 100%); }
+.wallet-actions [data-action="watch"] { min-width: 108px; justify-content: center; }
+.w-subhead { padding: 0 18px; }
+.w-subhead h2 { margin: 0; color: var(--text-2); font-size: 13px; font-weight: 500; }
+.w-foot { min-height: 52px; }
+.wallet-page .stat > span:last-child { white-space: nowrap; }
+/* Tablets: the wide tables take less room, and a table that still scrolls keeps its first column. */
+@media (min-width: 641px) and (max-width: 1180px) {
+  #periods .ep-long { display: none; }
+  #periods .ep-short { display: inline; }
+  #periods .t td .rank-of { min-width: 0; }
+  .wallet-page .t th:first-child, .wallet-page .t td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: inset -1px 0 0 var(--line); }
+  .wallet-page .t td .yr { display: none; }
+  .cmp td:not(.cmp-m), .cmp th:not(.cmp-m) { padding-right: 22px; }
+  .cmp td.cmp-best::after { right: 10px; }
+  .cmp thead .cmp-w { gap: 4px; }
+}
+@media (max-width: 860px) { .wallet-page .t td .rank-of { display: none; } }
+@media (max-width: 640px) {
+  #trade-list .t th:nth-child(3), #trade-list .t td:nth-child(3), #trade-list .t th:nth-child(7), #trade-list .t td:nth-child(7) { padding-left: 6px; padding-right: 6px; }
+  #trade-list .t th:nth-child(2), #trade-list .t td:nth-child(2) { padding-right: 6px; }
+  #trade-list .t th:nth-child(8), #trade-list .t td:nth-child(8) { padding-left: 6px; }
+}
+.w-fail { min-height: 240px; display: grid; }
 /* ========== end page: traders ========== */
 
 /* ========== page: risk (risk.js, liquidations.js, status.js, alerts.js) ========== */
