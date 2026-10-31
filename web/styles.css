@@ -952,9 +952,11 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .t .sub, .t .sub-sm { line-height: 16px; }
 .tag, .sub.tags .tag { font-size: 11px; font-weight: 500; }
 .info-tip { width: 14px; height: 14px; font-size: 12px; }
-/* Table rhythm: 44px rows, 38px compact, 52px and 48px when every row has a second
-   line. Those tables keep to the top, so first lines stay on one line across the
-   row; a group label row keeps its own height. */
+/* Table rhythm: 44px rows, 38px compact, 52px and 48px in tables with a second line.
+   Those keep to the top, so first lines stay on one line across the row; a group
+   label row keeps its own height. A compact row with nothing under its first line
+   stays one-line, and on a phone so does a table whose second lines all sit in
+   hidden columns. */
 .t th { color: var(--text-2); font-weight: 400; }
 .t th.sort:hover { color: var(--text); }
 .t td { height: 44px; padding-top: 4px; padding-bottom: 4px; vertical-align: middle; }
@@ -962,6 +964,10 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .t:has(td div.sub) td { height: 52px; vertical-align: top; padding-top: 8px; }
 .t.compact:has(td div.sub) td { height: 48px; padding-top: 5px; }
 .t:has(td div.sub) tr.grp td, .t.compact:has(td div.sub) tr.grp td { height: 34px; padding-top: 14px; padding-bottom: 6px; vertical-align: bottom; }
+.t.compact:has(td div.sub) tr:not(.grp):not(:has(.sub)) td { height: 38px; padding-top: 3px; padding-bottom: 3px; vertical-align: middle; }
+@media (max-width: 640px) {
+  .t:has(td div.sub):not(:has(td:not(.hide-sm) div.sub:not(.hide-sm), td .sub-sm)) tr:not(.grp) td { height: 44px; padding-top: 4px; vertical-align: middle; }
+}
 .t td .mkt, .t td .addr, .t td .tag, .t td .side, .t td .rank-pill { vertical-align: middle; }
 .t td .tag, .t td .side { margin-top: 0; }
 .cell-bar .track, .t.compact .cell-bar .track { top: calc(50% + 11px); }
