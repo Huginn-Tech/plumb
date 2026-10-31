@@ -164,8 +164,9 @@ export const skeleton = (rows = 6) => `<div class="panel-body">${Array.from({ le
 export const skChart = () => '<div class="skeleton sk-block"></div>';
 // Skeletons at the real geometry, so nothing moves when the data lands. Rows are
 // 44 px (38 compact, 52 on a phone), the head 34; pass the phone row where it differs.
-const onPhone = () => matchMedia('(max-width: 860px)').matches;
-export const skRows = (rows, rowH = 44, head = 34, phoneRowH = rowH) => { const r = onPhone() ? phoneRowH : rowH; return `<div class="sk-rows" style="height:${head + rows * r}px;--row:${r}px;--head:${head}px"></div>`; };
+// Rows change height at 640, grids collapse at 860.
+const onPhone = () => matchMedia('(max-width: 860px)').matches, phoneRows = () => matchMedia('(max-width: 640px)').matches;
+export const skRows = (rows, rowH = 44, head = 34, phoneRowH = rowH) => { const r = phoneRows() ? phoneRowH : rowH; return `<div class="sk-rows" style="height:${head + rows * r}px;--row:${r}px;--head:${head}px"></div>`; };
 export const skBox = (h, phone = h) => `<div class="skeleton sk-box" style="height:${onPhone() ? phone : h}px"></div>`;
 export const skKpis = (n, { spark = false, lines = 1 } = {}) => Array.from({ length: n }, () => `<div class="kpi"><div class="kpi-label"><span class="skeleton sk-in" style="width:46%"></span></div><div class="kpi-value"><span class="skeleton sk-in" style="width:64%;height:24px"></span></div><div class="kpi-row">${'<span class="kpi-note"><span class="skeleton sk-in" style="width:72%"></span></span>'.repeat(lines)}</div>${spark ? '<div class="spark"></div>' : ''}</div>`).join('');
 export const empty = text => `<div class="empty-state">${esc(text)}</div>`;
