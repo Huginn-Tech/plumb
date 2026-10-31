@@ -2,8 +2,8 @@
 // history, trader analytics (win rate, profit factor, drawdown, streaks,
 // hold time, best/worst markets), behaviour notes, trades, round trips, flows.
 import { get, stream } from '../api.js';
-import { usd, usdFull, int, price, pct, num, esc, size, duration, date, dateTime, ago, short, signClass, epochSpan, epochLeft } from '../format.js';
-import { kpi, tabs, table, mktLink, sideTag, pnl, pctCell, skeleton, skChart, empty, watch, ICON, EXPLORER, toast, chartTools, alertsLink, alertsBotReady, ratioCell } from '../ui.js';
+import { usd, usdShort, usdFull, int, price, dpOf, pct, share, num, esc, size, duration, date, dateTime, ago, short, signClass, epochSpan, epochLeft } from '../format.js';
+import { kpi, tabs, table, mktLink, sideTag, pnl, pnlShort, pctCell, skChart, skRows, skBox, skKpis, empty, watch, ICON, EXPLORER, toast, chartTools, alertsLink, alertsBotReady, ratioCell, DASH, morph, panelError, keepTrying, keepDots, infoTip } from '../ui.js';
 import { lineChart, signedBars, COLORS } from '../charts.js';
 
 const twinLink = rows => { const ids = {}; for (const r of rows) (ids[r.symbol] ??= new Set()).add(r.market); return r => `${mktLink(r.market, r.symbol)}${ids[r.symbol]?.size > 1 ? ` <span class="faint" title="Relisted market: the same asset under a new market id">#${esc(r.market)}</span>` : ''}`; };
@@ -13,29 +13,59 @@ const TABS = [['overview', 'Overview'], ['positions', 'Positions'], ['trades', '
 const KIND = { open: 'Open', increase: 'Add', decrease: 'Reduce', close: 'Close', invert: 'Flip', liquidation: 'Liquidated', deleverage: 'ADL', unwind: 'Unwind' };
 // "Aug 30 → Sep 6, 2026": the year once when both ends share it, so the range fits a KPI note.
 const dateSpan = (a, b) => { const x = date(a), y = date(b); return `${x.slice(-4) === y.slice(-4) ? x.slice(0, -6) : x} → ${y}`; };
+// A table or note amount: the short form, with the exact figure as its note.
+const amount = v => (num(v) === null ? DASH : `<span title="${esc(usdFull(v))}">${usdShort(v)}</span>`);
+// A UTC time whose year can give way where the table is tight.
+const stamp = ts => { const t = dateTime(ts); return `<span class="yr">${t.slice(0, 5)}</span>${t.slice(5)}`; };
+const leverage = v => `${Number(v ?? 0).toFixed(1)}x`;
+const trips = s => (s.trips ? `${int(s.trips)} · ${pct(s.win_rate_pct, { digits: 0 })} won` : '0');
+const TIP = {
+  win: 'Winning round trips as a share of closed round trips',
+  factor: 'Gross profit divided by gross loss on closed round trips. Above 1 is net positive.',
+  drawdown: 'Largest fall from a peak of cumulative net PnL, in round-trip order',
+  expectancy: 'Average net PnL per closed round trip',
+  winners: 'Median hold of winning round trips',
+  losers: 'Median hold of losing round trips',
+  funding: 'Funding received minus funding paid, all-time. Positive is a gain.',
+  distance: 'Mark price move that reaches the liquidation price',
+  ret: 'Net PnL as a share of entry notional, not of margin'
+};
+// Heights of the regions that land after the page, desktop and phone (ux-tools/stab-sizes.cjs).
+const PERIODS_H = [359, 400], PERF_H = [377, 753], INSIGHTS_H = [383, 436];
+// The open tab's outline before the wallet answers: a full first page of each list.
+const FRAME = { positions: () => skBox(500, 802), trades: () => skRows(100, 38, 155), trips: () => skRows(200, 45, 168), flows: () => skRows(12, 44, 85) };
+const WAIT = '<span class="skeleton" style="display:inline-block;width:72px;height:22px;vertical-align:middle"></span>';
+// A region that held a skeleton or a message takes the page's first answer whole; after
+// that it is patched, so what the reader has selected or focused stays.
+const fill = (node, html) => { if (!node) return; if (node.firstElementChild?.matches('.sk-box, .sk-rows, .panel-error')) node.innerHTML = html; else morph(node, html); };
 
 export function mount(el, { params, query, setQuery, navigate }) {
   const key = params[0];
   let tab = TABS.some(([v]) => v === query.get('tab')) ? query.get('tab') : 'overview';
   let pnlMode = 'cumulative', data = null, an = null, periods = null, alive = true, trades = [], next = null;
-  el.innerHTML = `<div class="stack"><section class="panel"><div class="panel-body" style="padding-top:16px">${skeleton(3)}</div></section><div class="kpis k7">${Array.from({ length: 7 }, () => '<div class="kpi"><div class="skeleton sk-line"></div></div>').join('')}</div>${skChart()}</div>`;
+  let shown = null, missing = false, failed = false, anFailed = false, periodsFailed = false, tradesBusy = false;
+  let seq = 0, anSeq = 0, periodSeq = 0, stopAnalytics = null, stopPeriods = null, stopTrades = null;
   const $ = s => el.querySelector(`#${s}`);
 
   // The bot's name comes with /health; the button appears once it is known.
   const alertsButton = address => (alertsLink(address) ? `<a class="btn ghost" data-alerts href="${esc(alertsLink(address))}" target="_blank" rel="noopener noreferrer" title="Position changes and near-liquidation warnings in Telegram">${ICON.bell} Alerts</a>` : '');
-  alertsBotReady.then(() => { const box = el.querySelector('.wallet-actions'); if (alive && data && box && !box.querySelector('[data-alerts]')) box.querySelector('[data-action="watch"]')?.insertAdjacentHTML('beforebegin', alertsButton(data.account.address)); });
+  alertsBotReady.then(() => { if (alive && data) morph($('w-head'), head(data)); });
+  // Before the answer the head is built from the URL, so it does not change shape when it lands.
   function head(d) {
-    const a = d.account, starred = watch.has(a.address);
-    const since = d.summary.first_trade ? `first trade ${date(d.summary.first_trade)} · ${int(d.summary.active_days)} active days · last ${ago(d.summary.last_trade)}` : 'no trades indexed yet';
+    const a = d?.account ?? { address: /^0x[0-9a-f]{40}$/i.test(key) ? key : null, id: key }, starred = watch.has(a.address ?? key);
+    const all = periods?.periods?.find(x => x.window === 'all');
+    const partial = all?.coverage_complete === false ? ' · <span class="tag warn" title="Wallet history is still being indexed, so all-time totals are incomplete">partial history</span>' : '';
+    const s = d?.summary, since = s?.first_trade ? `first trade ${date(s.first_trade)} · ${int(s.active_days)} active days · last trade ${ago(s.last_trade)}` : 'no trades indexed yet';
+    const name = a.address ? `<span class="addr-full">${esc(a.address)}</span><span class="addr-short">${esc(short(a.address))}</span>` : `Account #${esc(a.id)}`;
     return `<div class="page-head"><div class="wallet-head">
-        <div class="wallet-id"><div class="sub"><a href="/traders">Traders</a> / Wallet</div><div class="big"><span class="addr-full">${esc(a.address)}</span><span class="addr-short">${esc(short(a.address))}</span></div>
-          <div class="sub">Account #${esc(a.id)} · ${esc(since)}</div></div></div>
+        <div class="wallet-id"><div class="sub"><a href="/traders">Traders</a> / Wallet</div><div class="big">${name}</div>
+          <div class="sub">${d ? keepDots(`Account #${esc(a.id)} · ${esc(since)}${partial}`) : failed ? '' : '<span class="skeleton sk-in w-sk-sub"></span>'}</div></div></div>
         <div class="wallet-actions">
-          <button class="btn ghost" data-copy="${esc(a.address)}">${ICON.copy} Copy</button>
-          <a class="btn ghost" href="${EXPLORER}/address/${esc(a.address)}" target="_blank" rel="noopener noreferrer">${ICON.ext} Explorer</a>
+          ${a.address ? `<button class="btn ghost" data-copy="${esc(a.address)}">${ICON.copy} Copy</button>
+          <a class="btn ghost" href="${EXPLORER}/address/${esc(a.address)}" target="_blank" rel="noopener noreferrer">${ICON.ext} Explorer</a>` : ''}
           <button class="btn ghost" data-action="compare">${ICON.plus} Compare</button>
           <button class="btn ghost" data-action="share" title="Download a summary card (PNG)">${ICON.image} Share</button>
-          ${alertsButton(a.address)}
+          ${a.address ? alertsButton(a.address) : ''}
           <button class="btn ${starred ? '' : 'primary'}" data-action="watch">${starred ? ICON.star + ' Watching' : ICON.starOff + ' Watch'}</button>
         </div></div>`;
   }
@@ -45,55 +75,56 @@ export function mount(el, { params, query, setQuery, navigate }) {
   function kpis(d) {
     const p = d.portfolio, perf = an?.performance, s = d.summary;
     const since = cutSince() ? ` · <span class="cut-since"${cutTitle()}>since ${cutSince().slice(0, -6)}</span>` : '';
-    const wait = '<span class="skeleton" style="display:inline-block;width:72px;height:22px;vertical-align:middle"></span>';
+    const wait = anFailed ? DASH : WAIT, near = p?.closest_liquidation;
+    const pending = anFailed ? '<span class="status-dot warn" title="Round trips could not be loaded. Trying again."></span>' : 'analysing round trips…';
     return `<div class="kpis k7">${[
-      kpi({ label: 'Account value', value: usd(p?.account_value), note: p ? `${int(p.positions)} open · ${p.leverage ?? 0}x lev.` : 'live state unavailable', tip: 'Live balance, including funds locked by orders, plus open positions\' margin and unrealized PnL.' }),
-      kpi({ label: 'Unrealized PnL', value: pnl(p?.unrealized_pnl), note: p?.closest_liquidation ? `closest liq. ${pct(p.closest_liquidation.distance_pct, { digits: 1 })} away` : '' }),
-      kpi({ label: 'Net PnL', value: pnl(s.net_pnl), note: `after ${usd(s.fees)} fees`, tip: `All-time realized PnL with funding (${usd(s.realized, { sign: true })}), minus fees (${usd(s.fees)}).` }),
-      kpi({ label: 'Win rate', value: !perf ? wait : perf.win_rate_pct === null ? '—' : pct(perf.win_rate_pct, { digits: 1 }), note: perf ? `${int(perf.wins)}W · ${int(perf.losses)}L of ${int(perf.closed_trips)} trips${since}` : 'analysing round trips…' }),
-      kpi({ label: 'Profit factor', value: !perf ? wait : perf.profit_factor === null ? '—' : perf.profit_factor.toFixed(2), note: perf ? `avg win ${usd(perf.average_win)} · loss ${usd(perf.average_loss)}` : '' }),
-      kpi({ label: 'Volume', value: usd(s.volume), note: `${int(s.trades)} trades · ${pct(s.maker_share_pct, { digits: 0 })} maker` }),
-      kpi({ label: 'Max drawdown', value: !perf ? wait : `<span class="${num(perf.max_drawdown) > 0 ? 'neg' : ''}">${usd(perf.max_drawdown)}</span>`, note: perf?.drawdown_to ? `${dateSpan(perf.drawdown_from, perf.drawdown_to)}${since}` : 'on closed round trips' })
+      kpi({ label: 'Account value', value: usd(p?.account_value), note: p ? (p.positions ? `${int(p.positions)} open · ${leverage(p.leverage)} leverage` : 'no open positions') : 'live state unavailable', tip: 'Live balance, including funds locked by orders, plus open positions\' margin and unrealized PnL.' }),
+      kpi({ label: 'Unrealized PnL', value: pnl(p?.unrealized_pnl), note: near ? `<span title="${esc(`Closest to liquidation: ${near.symbol} ${near.side}`)}">liq. distance ${pct(near.distance_pct, { digits: 1 })}</span>` : '' }),
+      kpi({ label: 'Net PnL · all-time', value: pnl(s.net_pnl), note: `after ${usdShort(s.fees)} fees`, tip: `All-time realized PnL with funding (${usd(s.realized, { sign: true })}), minus fees (${usd(s.fees)}).` }),
+      kpi({ label: 'Win rate', value: !perf ? wait : perf.win_rate_pct === null ? DASH : pct(perf.win_rate_pct, { digits: 1 }), note: perf ? `${int(perf.wins)}W · ${int(perf.losses)}L · ${int(perf.closed_trips)} trips${since}` : pending, tip: TIP.win }),
+      kpi({ label: 'Profit factor', value: !perf ? wait : perf.profit_factor === null ? DASH : perf.profit_factor.toFixed(2), note: perf ? `avg win ${usdShort(perf.average_win)} · loss ${usdShort(perf.average_loss)}` : '', tip: TIP.factor }),
+      kpi({ label: 'Volume · all-time', value: usd(s.volume), note: `${int(s.trades)} trades · ${pct(s.maker_share_pct, { digits: 0 })} maker` }),
+      kpi({ label: 'Max drawdown', value: !perf ? wait : `<span class="${num(perf.max_drawdown) > 0 ? 'neg' : ''}">${usd(perf.max_drawdown)}</span>`, note: perf?.drawdown_to ? `${dateSpan(perf.drawdown_from, perf.drawdown_to)}${since}` : 'on closed round trips', tip: TIP.drawdown })
     ].join('')}</div>`;
   }
   const POS_COLS = [
     { key: 'm', label: 'Market', render: r => mktLink(r.market, r.symbol) },
     { key: 's', label: 'Side', render: r => sideTag(r.side) },
     { key: 'size', label: 'Size', phone: false, n: true, render: r => size(r.size) },
-    { key: 'notional', label: 'Notional', n: true, render: r => usd(r.notional) },
-    { key: 'entry', label: 'Entry', phone: false, n: true, render: r => price(r.entry_price) },
-    { key: 'mark', label: 'Mark', phone: false, n: true, render: r => price(r.mark) },
-    { key: 'lev', label: 'Leverage', phone: false, n: true, render: r => (r.leverage ? `${Number(r.leverage).toFixed(1)}x` : '—') },
-    { key: 'upnl', label: 'uPnL', phone: false, n: true, render: r => pnl(r.pnl) },
-    { key: 'liq', label: 'Liq. price', phone: false, n: true, render: r => (num(r.liquidation_price) > 0 ? price(r.liquidation_price) : '<span class="faint" title="No liquidation price: the margin covers any price move">none</span>') },
-    { key: 'dist', label: 'Distance', n: true, render: r => (r.liquidation_distance_pct === null || !(num(r.liquidation_price) > 0) ? '<span class="faint">—</span>' : `<span class="${r.liquidation_distance_pct < 5 ? 'neg' : r.liquidation_distance_pct < 15 ? '' : 'muted'}">${pct(r.liquidation_distance_pct, { digits: 1 })}</span>`) },
-    { key: 'margin', label: 'Margin', phone: false, n: true, render: r => usd(r.deposit) }
+    { key: 'notional', label: 'Notional', n: true, render: r => amount(r.notional) },
+    { key: 'entry', label: 'Entry', phone: false, n: true, render: r => price(r.entry_price, dpOf(r.mark)) },
+    { key: 'mark', label: 'Mark', phone: false, n: true, render: r => price(r.mark, dpOf(r.mark)) },
+    { key: 'lev', label: 'Leverage', phone: false, n: true, render: r => (r.leverage ? leverage(r.leverage) : DASH) },
+    { key: 'upnl', label: 'Unrealized PnL', phone: false, n: true, render: r => pnlShort(r.pnl) },
+    { key: 'liq', label: 'Liq. price', phone: false, n: true, render: r => (num(r.liquidation_price) > 0 ? price(r.liquidation_price, dpOf(r.mark)) : '<span class="faint" title="No liquidation price: the margin covers any price move">none</span>') },
+    { key: 'dist', label: 'Liq. distance', tip: TIP.distance, n: true, render: r => (r.liquidation_distance_pct === null || !(num(r.liquidation_price) > 0) ? DASH : `<span class="${r.liquidation_distance_pct < 5 ? 'neg' : r.liquidation_distance_pct < 15 ? '' : 'muted'}">${pct(r.liquidation_distance_pct, { digits: 1 })}</span>`) },
+    { key: 'margin', label: 'Margin', phone: false, n: true, render: r => amount(r.deposit) }
   ];
   const TRADE_COLS = [
     { key: 'ts', label: 'Time (UTC)', phone: false, render: r => `<span class="muted num">${dateTime(r.ts)}</span>` },
     { key: 'm', label: 'Market', render: r => mktLink(r.market, r.symbol) },
     { key: 'k', label: 'Action', render: r => `${esc(KIND[r.kind] ?? r.kind)} ${sideTag(r.side)}` },
-    { key: 'role', label: 'Role', phone: false, render: r => `<span class="muted">${esc(r.role === 'none' ? '—' : r.role)}</span>` },
-    { key: 'p', label: 'Price', phone: false, n: true, render: r => price(r.price) },
+    { key: 'role', label: 'Role', phone: false, render: r => (r.role === 'none' ? DASH : `<span class="muted">${esc(r.role)}</span>`) },
+    { key: 'p', label: 'Price', phone: false, n: true, render: r => (r.price === null ? DASH : price(r.price, dpOf(r.price))) },
     { key: 'sz', label: 'Size', phone: false, n: true, render: r => size(r.size) },
-    { key: 'n', label: 'Notional', n: true, render: r => usd(r.notional) },
-    { key: 'pnl', label: 'Realized', n: true, render: r => (['decrease', 'close', 'invert', 'liquidation', 'deleverage'].includes(r.kind) ? pnl(r.pnl) : '<span class="faint">—</span>') },
-    { key: 'fee', label: 'Fee', phone: false, n: true, render: r => (num(r.fee) ? usd(r.fee) : '<span class="faint">0</span>') },
+    { key: 'n', label: 'Notional', n: true, render: r => amount(r.notional) },
+    { key: 'pnl', label: 'Realized PnL', tip: 'Profit or loss this change booked, before fees', n: true, render: r => (['decrease', 'close', 'invert', 'liquidation', 'deleverage'].includes(r.kind) ? pnlShort(r.pnl) : DASH) },
+    { key: 'fee', label: 'Fee', phone: false, n: true, render: r => amount(r.fee) },
     { key: 'tx', label: 'Tx', phone: false, render: r => `<a class="faint mono" href="${EXPLORER}/tx/${esc(r.tx)}" target="_blank" rel="noopener noreferrer">${esc(r.tx.slice(0, 8))}…</a>` }
   ];
 
   function perfPanel(perf, s) {
-    const stat = (a, b) => `<div class="stat"><span>${a}</span><span>${b}</span></div>`;
+    const stat = (a, b, tip = null) => `<div class="stat"><span>${a}${infoTip(tip, a)}</span><span>${b}</span></div>`;
     return `<div class="stat-grid">
-      ${stat('Closed round trips', int(perf.closed_trips))}${stat('Expectancy / trip', pnl(perf.expectancy))}
-      ${stat('Largest win', pnl(perf.largest_win))}${stat('Largest loss', pnl(perf.largest_loss))}
+      ${stat('Closed round trips', int(perf.closed_trips))}${stat('Expectancy / trip', pnlShort(perf.expectancy), TIP.expectancy)}
+      ${stat('Largest win', pnlShort(perf.largest_win))}${stat('Largest loss', pnlShort(perf.largest_loss))}
       ${stat('Best streak', `${int(perf.best_streak)} ${perf.best_streak === 1 ? 'win' : 'wins'}`)}${stat('Worst streak', `${int(perf.worst_streak)} ${perf.worst_streak === 1 ? 'loss' : 'losses'}`)}
       ${stat('Median hold', duration(perf.median_hold_seconds))}${stat('Average hold', duration(perf.average_hold_seconds))}
-      ${stat('Winners held', duration(perf.median_win_hold_seconds))}${stat('Losers held', duration(perf.median_loss_hold_seconds))}
-      ${stat('Long trips', `${int(perf.long.trips)} · ${perf.long.win_rate_pct === null ? '—' : pct(perf.long.win_rate_pct, { digits: 0 })} win`)}${stat('Short trips', `${int(perf.short.trips)} · ${perf.short.win_rate_pct === null ? '—' : pct(perf.short.win_rate_pct, { digits: 0 })} win`)}
-      ${stat('Long net PnL', pnl(perf.long.net_pnl))}${stat('Short net PnL', pnl(perf.short.net_pnl))}
-      ${stat('Best market', perf.best_market ? `${esc(perf.best_market.symbol)} · ${pnl(perf.best_market.net_pnl)}` : '—')}${stat(num(perf.worst_market?.net_pnl) > 0 ? 'Weakest market' : 'Worst market', perf.worst_market ? `${esc(perf.worst_market.symbol)} · ${pnl(perf.worst_market.net_pnl)}` : '—')}
-      ${stat('Funding (net)', pnl(s.funding))}${stat('Liquidated trips', int(perf.liquidated_trips))}
+      ${stat('Winners held', duration(perf.median_win_hold_seconds), TIP.winners)}${stat('Losers held', duration(perf.median_loss_hold_seconds), TIP.losers)}
+      ${stat('Long trips', trips(perf.long))}${stat('Short trips', trips(perf.short))}
+      ${stat('Long net PnL', pnlShort(perf.long.net_pnl))}${stat('Short net PnL', pnlShort(perf.short.net_pnl))}
+      ${stat('Best market', perf.best_market ? `${esc(perf.best_market.symbol)} · ${pnlShort(perf.best_market.net_pnl)}` : DASH)}${stat('Worst market', perf.worst_market ? `${esc(perf.worst_market.symbol)} · ${pnlShort(perf.worst_market.net_pnl)}` : DASH)}
+      ${stat('Funding (net)', pnlShort(s.funding), TIP.funding)}${stat('Liquidated trips', int(perf.liquidated_trips))}
     </div>${perf.based_on.truncated ? `<div class="panel-foot"><span>Round-trip analytics use the latest ${int(perf.based_on.events)} of ${int(perf.based_on.total_events)} events (since ${date(perf.based_on.since)}); totals use full history.</span></div>` : ''}`;
   }
   function heatmap(grid) {
@@ -103,91 +134,114 @@ export function mount(el, { params, query, setQuery, navigate }) {
   }
 
   // The tabs sit on the page and each tab lays out its own cards, so no card
-  // is drawn inside another.
+  // is drawn inside another. The page stands from the first paint; an answer only
+  // patches what changed, so a refresh leaves selection, focus and the chart alone.
+  el.innerHTML = `<div id="w-head">${head(null)}</div><div class="stack wallet-page"><div id="kpi-row"><div class="kpis k7">${skKpis(7)}</div></div>
+    <div class="wallet-tabs">${tabs('tab', TABS, tab)}</div><div class="stack" id="tab-body">${frames()}</div></div>`;
+  showTab();
+  // Before the wallet answers, the open tab's outline. On Overview the real panels replace
+  // these frames in one paint, whether or not open positions come first.
+  function frames() {
+    if (tab !== 'overview') return `<section class="panel">${FRAME[tab]()}</section>`;
+    const box = (title, h, phone) => `<section class="panel"><div class="panel-head"><h2>${title}</h2></div>${skBox(h, phone)}</section>`;
+    return `${box('By period', PERIODS_H[0], PERIODS_H[1] + 26)}<div class="grid g-main">${box('Net PnL', PERF_H[0], 441)}${box('Performance', PERF_H[0], PERF_H[1] + 26)}</div><div class="grid g-2">${box('Behaviour', INSIGHTS_H[0], INSIGHTS_H[1] + 26)}${box('By market', INSIGHTS_H[0], 348)}</div>`;
+  }
   function render() {
-    const d = data;
-    el.innerHTML = `${head(d)}<div class="stack wallet-page"><div id="kpi-row">${kpis(d)}</div>
-      <div class="wallet-tabs">${tabs('tab', TABS, tab)}</div><div class="stack" id="tab-body"></div></div>`;
-    showTab();
+    morph($('w-head'), head(data));
+    morph($('kpi-row'), kpis(data));
     renderTab();
   }
   // Marks the open tab and, where the strip scrolls sideways (phones), brings
   // it into view without moving the page.
   function showTab() {
     const strip = el.querySelector('.wallet-tabs .tabs'); if (!strip) return;
-    strip.querySelectorAll('[data-tab="tab"]').forEach(b => b.classList.toggle('on', b.dataset.v === tab));
+    strip.querySelectorAll('[data-tab="tab"]').forEach(b => { const on = b.dataset.v === tab; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
     const s = strip.getBoundingClientRect(), b = strip.querySelector('.on').getBoundingClientRect();
     strip.scrollLeft += Math.max(0, b.right - s.right) - Math.max(0, s.left - b.left);
   }
-  const perfSkeleton = () => `<div class="panel-body">${Array.from({ length: 7 }, () => '<div class="skeleton sk-line"></div>').join('')}</div>`;
   function marketRows(d) {
     const perf = new Map((an?.performance.markets ?? []).map(x => [x.market, x]));
     return d.markets.map(m => ({ ...m, trips: perf.get(m.market)?.trips ?? null, win_rate_pct: perf.get(m.market)?.win_rate_pct ?? null }));
   }
+  const blockOf = d => int(d.portfolio?.block ?? d.meta.block);
+  const positionsPanel = d => (d.positions.length ? `<section class="panel"><div class="panel-head"><h2>Open positions</h2><span class="meta">Contract state at block ${blockOf(d)}</span></div><div class="panel-body flush">${table({ id: 'pos', columns: POS_COLS, rows: d.positions })}</div></section>` : '');
+  const marketTable = d => table({ id: 'mk', compact: true, columns: [
+    { key: 'm', label: 'Market', render: twinLink(d.markets) },
+    { key: 'v', label: 'Volume', n: true, render: r => amount(r.volume) },
+    { key: 'p', label: 'Net PnL', n: true, render: r => pnlShort(r.net_pnl) },
+    { key: 'w', label: 'Win rate', n: true, render: r => (r.win_rate_pct === null ? DASH : pct(r.win_rate_pct, { digits: 0 })) },
+    { key: 't', label: 'Trips', phone: false, n: true, render: r => (r.trips === null ? DASH : int(r.trips)) }
+  ], rows: marketRows(d), emptyText: 'No trades' });
+  const overviewHtml = d => `
+    <div id="pos-slot"></div>
+    <section class="panel"><div class="panel-head"><h2>By period</h2><span class="meta">Rank among every trader in the period</span></div>
+      <div class="panel-body flush" id="periods">${periods ? periodsTable() : skBox(...PERIODS_H)}</div></section>
+    <div class="grid g-main">
+      <section class="panel trend pnl-card"><div class="panel-head"><div class="trend-id"><h2>Net PnL${infoTip('Realized PnL with funding, minus fees, per UTC day. Open positions count once reduced or closed.', 'Net PnL')}</h2><div class="head-value" id="pnl-v"></div></div>
+        <div class="trend-side"><div class="trend-ctl">${chartTools('pnl-chart', `wallet-${d.account.id}-pnl`)}<div class="seg sm"><button data-action="pnl-cum" class="${pnlMode === 'cumulative' ? 'on' : ''}">Cumulative</button><button data-action="pnl-daily" class="${pnlMode === 'daily' ? 'on' : ''}">Daily</button><button data-action="pnl-cal" class="${pnlMode === 'calendar' ? 'on' : ''}">Calendar</button></div></div><div class="legend dots" id="pnl-lg"></div></div></div>
+        <div class="panel-body"><div class="chart" id="pnl-chart">${skChart()}</div></div></section>
+      <section class="panel"><div class="panel-head"><h2>Performance</h2><span class="meta" id="perf-meta"></span></div><div id="perf">${skBox(...PERF_H)}</div></section>
+    </div>
+    <div class="grid g-2">
+      <section class="panel"><div class="panel-head"><h2>Behaviour</h2><span class="meta" id="ins-meta"></span></div><div id="insights">${skBox(...INSIGHTS_H)}</div></section>
+      <section class="panel"><div class="panel-head"><h2>By market</h2><span class="meta" title="Volume and net PnL are all-time; win rate and trips count closed round trips only">${keepDots('Volume, PnL all-time · win rate, trips from analysed trips')}</span></div><div class="panel-body flush" id="mk-body"></div></section>
+    </div>`;
+  const positionsTab = d => {
+    const p = d.portfolio;
+    return `${p ? `<section class="panel"><div class="panel-head"><h2>Account</h2><span class="meta">Contract state at block ${blockOf(d)}</span></div><div class="stat-grid acct-grid">
+        <div class="stat"><span>Balance</span><span>${usdFull(p.balance)}</span></div><div class="stat"><span>Available</span><span>${usdFull(p.available_balance ?? p.balance)}</span></div><div class="stat"><span>Locked by orders</span><span>${usdFull(p.locked_balance)}</span></div>
+        <div class="stat"><span>Position margin</span><span>${usdFull(p.position_margin)}</span></div><div class="stat"><span>Account value</span><span>${usdFull(p.account_value)}</span></div>
+        <div class="stat"><span>Margin usage</span><span>${pct(p.margin_usage_pct, { digits: 1 })}</span></div><div class="stat"><span>Effective leverage</span><span>${leverage(p.leverage)}</span></div>
+        <div class="stat"><span>Unrealized PnL</span><span class="${signClass(p.unrealized_pnl)}">${num(p.unrealized_pnl) > 0 ? '+' : ''}${usdFull(p.unrealized_pnl)}</span></div>
+      </div></section>` : ''}<section class="panel"><div class="panel-head"><h2>Open positions</h2><span class="meta">${int(d.positions.length)} open</span></div><div class="panel-body flush">${table({ id: 'pos', columns: POS_COLS, rows: d.positions, emptyText: 'No open positions' })}</div></section>`;
+  };
+  const tripsTab = () => {
+    const tripRows = [...an.open_trips.map(t => ({ ...t, open: true })), ...an.trips];
+    // The list holds the latest closed trips only; the totals above count them all.
+    const closedAll = an.performance?.closed_trips ?? an.trips.length, capped = an.trips.length < closedAll;
+    return `<section class="panel"><div class="panel-head"><div><h2>Round trips</h2><div class="desc">Open trips first, then ${capped ? `the latest ${int(an.trips.length)} of ${int(closedAll)} closed trips` : 'closed trips'}, newest close first</div></div></div>` + table({ id: 'trips', columns: [
+      { key: 'm', label: 'Market', render: twinLink(tripRows) },
+      { key: 's', label: 'Side', render: r => sideTag(r.side) },
+      { key: 'c', label: 'Closed (UTC)', phone: false, render: r => (r.open ? '<span class="faint">open</span>' : `<span class="muted num">${stamp(r.close_ts)}</span>`) },
+      { key: 'o', label: 'Opened (UTC)', phone: false, render: r => `<span class="muted num">${r.open_ts ? stamp(r.open_ts) : `before ${stamp(r.first_ts)}`}</span>` },
+      { key: 'h', label: 'Held', n: true, render: r => (r.hold_seconds === null ? DASH : duration(r.hold_seconds)) },
+      { key: 'sz', label: 'Max size', phone: false, n: true, render: r => size(r.max_size) },
+      { key: 'e', label: 'Entry notional', phone: false, n: true, render: r => amount(r.entry_notional) },
+      { key: 'lev', label: 'Max lev.', phone: false, n: true, render: r => (r.max_leverage ? leverage(r.max_leverage) : DASH) },
+      { key: 'p', label: 'Net PnL', n: true, render: r => pnlShort(r.net_pnl) },
+      { key: 'r', label: 'Return on notional', tip: TIP.ret, phone: false, n: true, render: r => pctCell(r.return_pct) },
+      { key: 'f', label: 'Outcome', phone: false, render: r => (r.open ? '<span class="tag" title="Still open: Net PnL counts only what is realized so far, after fees">open</span>' : r.liquidated ? '<span class="tag bad">liquidated</span>' : r.deleveraged ? '<span class="tag warn">ADL</span>' : num(r.net_pnl) > 0 ? '<span class="tag good">win</span>' : num(r.net_pnl) < 0 ? '<span class="tag">loss</span>' : '<span class="tag">flat</span>') }
+    ], rows: tripRows, rowAttrs: r => (r.open ? 'title="Still open"' : ''), emptyText: 'No round trips yet' }) + '</section>';
+  };
+  const flowsTab = d => `<section class="panel"><div class="panel-head"><h2>Deposits & withdrawals</h2><span class="meta">Newest first</span></div><div class="stat-grid" style="border-bottom:1px solid var(--line)"><div class="stat"><span>Total deposits</span><span class="pos">${usdFull(d.summary.deposits)}</span></div><div class="stat"><span>Total withdrawals</span><span class="neg">${usdFull(d.summary.withdrawals)}</span></div>${num(d.summary.payouts_received) > 0 ? `<div class="stat"><span title="Transfers from Perpl's protocol balance to this account, such as rebates or rewards">Paid by the protocol</span><span class="pos">${usdFull(d.summary.payouts_received)}</span></div>` : ''}${num(d.summary.swept_to_protocol) > 0 ? `<div class="stat"><span title="Transfers from this account into Perpl's protocol balance">Moved to the protocol</span><span class="neg">${usdFull(d.summary.swept_to_protocol)}</span></div>` : ''}</div>` + table({ id: 'flows', columns: [
+    { key: 't', label: 'Time (UTC)', render: r => `<span class="muted num">${stamp(r.ts)}</span>` },
+    { key: 'k', label: 'Type', render: r => `<span class="${FLOW_KIND[r.kind]?.[1] ?? ''}">${FLOW_KIND[r.kind]?.[0] ?? esc(r.kind)}</span>` },
+    { key: 'a', label: 'Amount', n: true, render: r => usdFull(r.amount) },
+    { key: 'b', label: 'Balance after', phone: false, n: true, render: r => usdFull(r.balance_after) },
+    { key: 'tx', label: 'Tx', phone: false, render: r => `<a class="faint mono" href="${EXPLORER}/tx/${esc(r.tx)}" target="_blank" rel="noopener noreferrer">${esc(r.tx.slice(0, 10))}…</a>` }
+  ], rows: d.flows, emptyText: 'No deposits or withdrawals indexed' }) + '</section>';
+  // The open tab: its panels are written once, then patched by each answer.
   function renderTab() {
     const d = data, body = $('tab-body');
-    const block = int(d.portfolio?.block ?? d.meta.block);
+    if (!d || !body) return;
+    const opened = shown !== tab;
+    const paint = html => { if (opened) body.innerHTML = html; else fill(body, html); };
+    shown = tab;
     if (tab === 'overview') {
-      body.innerHTML = `
-        ${d.positions.length ? `<section class="panel"><div class="panel-head"><h2>Open positions</h2><span class="meta">Contract state at block ${block}</span></div><div class="panel-body flush">${table({ id: 'pos', columns: POS_COLS, rows: d.positions })}</div></section>` : ''}
-        <section class="panel"><div class="panel-head"><h2>By period</h2><span class="meta">Rank among every account that traded in the period</span></div>
-          <div class="panel-body flush" id="periods">${periods ? periodsTable() : skeleton(4)}</div></section>
-        <div class="grid g-main">
-          <section class="panel trend pnl-card"><div class="panel-head"><div class="trend-id"><h2>Net PnL <span class="info-tip" title="Realized PnL with funding, minus fees, per UTC day. Open positions count once reduced or closed.">i</span></h2><div class="head-value" id="pnl-v"></div></div>
-            <div class="trend-side"><div class="trend-ctl">${chartTools('pnl-chart', `wallet-${d.account.id}-pnl`)}<div class="seg sm"><button data-action="pnl-cum" class="${pnlMode === 'cumulative' ? 'on' : ''}">Cumulative</button><button data-action="pnl-daily" class="${pnlMode === 'daily' ? 'on' : ''}">Daily</button><button data-action="pnl-cal" class="${pnlMode === 'calendar' ? 'on' : ''}">Calendar</button></div></div><div class="legend dots" id="pnl-lg"></div></div></div>
-            <div class="panel-body"><div class="chart" id="pnl-chart"></div></div></section>
-          <section class="panel"><div class="panel-head"><h2>Performance</h2><span class="meta" id="perf-meta">Closed round trips, net of fees</span></div><div id="perf">${an ? perfPanel(an.performance, d.summary) : perfSkeleton()}</div></section>
-        </div>
-        <div class="grid g-2">
-          <section class="panel"><div class="panel-head"><h2>Behaviour</h2><span class="meta" id="ins-meta">Rule-based, from this wallet's trades</span></div>
-            <div id="insights">${an ? insightsHtml() : perfSkeleton()}</div></section>
-          <section class="panel"><div class="panel-head"><h2>By market</h2><span class="meta" title="Volume and net PnL are all-time; win rate and trips count closed round trips only">Volume, PnL all-time · win rate, trips from analysed trips</span></div><div class="panel-body flush">${table({ id: 'mk', compact: true, columns: [
-            { key: 'm', label: 'Market', render: twinLink(d.markets) },
-            { key: 'v', label: 'Volume', n: true, render: r => usd(r.volume) },
-            { key: 'p', label: 'Net PnL', n: true, render: r => pnl(r.net_pnl) },
-            { key: 'w', label: 'Win rate', n: true, render: r => (r.win_rate_pct === null ? '—' : pct(r.win_rate_pct, { digits: 0 })) },
-            { key: 't', label: 'Trips', phone: false, n: true, render: r => (r.trips === null ? '—' : int(r.trips)) }
-          ], rows: marketRows(d), emptyText: 'No trades' })}</div></section>
-        </div>`;
+      if (opened) body.innerHTML = overviewHtml(d);
+      morph($('pos-slot'), positionsPanel(d));
+      morph($('mk-body'), marketTable(d));
+      if (periods) fill($('periods'), periodsTable()); else if (periodsFailed) periodsError();
+      fillAnalytics();
       drawPnl();
-    } else if (tab === 'positions') {
-      const p = d.portfolio;
-      body.innerHTML = `${p ? `<section class="panel"><div class="panel-head"><h2>Account</h2><span class="meta">Contract state at block ${block}</span></div><div class="stat-grid acct-grid">
-          <div class="stat"><span>Balance</span><span>${usdFull(p.balance)}</span></div><div class="stat"><span>Available</span><span>${usdFull(p.available_balance ?? p.balance)}</span></div><div class="stat"><span>Locked by orders</span><span>${usdFull(p.locked_balance)}</span></div>
-          <div class="stat"><span>Position margin</span><span>${usdFull(p.position_margin)}</span></div><div class="stat"><span>Account value</span><span>${usdFull(p.account_value)}</span></div>
-          <div class="stat"><span>Margin usage</span><span>${pct(p.margin_usage_pct, { digits: 1 })}</span></div><div class="stat"><span>Effective leverage</span><span>${p.leverage ?? 0}x</span></div>
-          <div class="stat"><span>Unrealized PnL</span><span class="${signClass(p.unrealized_pnl)}">${num(p.unrealized_pnl) > 0 ? '+' : ''}${usdFull(p.unrealized_pnl)}</span></div>
-        </div></section>` : ''}<section class="panel"><div class="panel-head"><h2>Open positions</h2><span class="meta">${int(d.positions.length)} open</span></div><div class="panel-body flush">${table({ id: 'pos', columns: POS_COLS, rows: d.positions, emptyText: 'No open positions' })}</div></section>`;
-    } else if (tab === 'trades') {
-      body.innerHTML = `<section class="panel"><div class="panel-head"><div><h2>Trade history</h2><div class="desc">Newest first · every position change with its fill</div></div><a class="btn ghost" href="/api/v1/wallets/${esc(d.account.address)}/trades?format=csv&limit=10000">${ICON.download} CSV</a></div><div class="panel-body flush" id="trade-list">${skeleton(8)}</div><div class="panel-foot"><span id="trade-count"></span><button class="btn ghost" data-action="more" id="more">Load more</button></div></section>`;
-      if (trades.length) renderTrades(); else loadTrades();
+    } else if (tab === 'positions') paint(positionsTab(d));
+    else if (tab === 'trades') {
+      if (opened) body.innerHTML = `<section class="panel"><div class="panel-head"><div><h2>Trade history</h2><div class="desc">${keepDots('Newest first · every position change with its fill')}</div></div><a class="btn ghost" href="/api/v1/wallets/${esc(d.account.address)}/trades?format=csv&limit=10000">${ICON.download} CSV</a></div><div class="panel-body flush" id="trade-list">${skRows(Math.min(100, Number(d.summary.trades) || 8), 38)}</div><div class="panel-foot w-foot"><span id="trade-count"></span><button class="btn ghost" data-action="more" id="more" hidden>Load more</button></div></section>`;
+      if (trades.length) renderTrades(); else openTrades();
     } else if (tab === 'trips') {
-      if (!an) { body.innerHTML = `<section class="panel">${perfSkeleton()}</section>`; return; }
-      const tripRows = [...an.open_trips.map(t => ({ ...t, open: true })), ...an.trips];
-      // The list holds the latest closed trips only; the totals above count them all.
-      const closedAll = an.performance?.closed_trips ?? an.trips.length, capped = an.trips.length < closedAll;
-      body.innerHTML = `<section class="panel"><div class="panel-head"><div><h2>Round trips</h2><div class="desc">Open trips first, then ${capped ? `the latest ${int(an.trips.length)} of ${int(closedAll)} closed trips` : 'closed trips'}, newest close first</div></div></div>` + table({ id: 'trips', columns: [
-        { key: 'm', label: 'Market', render: twinLink(tripRows) },
-        { key: 's', label: 'Side', render: r => sideTag(r.side) },
-        { key: 'c', label: 'Closed', phone: false, render: r => (r.open ? '<span class="faint">open</span>' : `<span class="muted num">${dateTime(r.close_ts)}</span>`) },
-        { key: 'o', label: 'Opened', phone: false, render: r => `<span class="muted num">${r.open_ts ? dateTime(r.open_ts) : `before ${dateTime(r.first_ts)}`}</span>` },
-        { key: 'h', label: 'Held', n: true, render: r => duration(r.hold_seconds) },
-        { key: 'sz', label: 'Max size', phone: false, n: true, render: r => size(r.max_size) },
-        { key: 'e', label: 'Entry notional', phone: false, n: true, render: r => usd(r.entry_notional) },
-        { key: 'lev', label: 'Max lev.', phone: false, n: true, render: r => (r.max_leverage ? `${r.max_leverage.toFixed(1)}x` : '—') },
-        { key: 'p', label: 'Net PnL', n: true, render: r => pnl(r.net_pnl) },
-        { key: 'r', label: 'Return', phone: false, n: true, render: r => pctCell(r.return_pct) },
-        { key: 'f', label: 'Outcome', phone: false, render: r => (r.open ? '<span class="tag" title="Still open: Net PnL counts only what is realized so far, after fees">open</span>' : r.liquidated ? '<span class="tag bad">liquidated</span>' : r.deleveraged ? '<span class="tag warn">ADL</span>' : num(r.net_pnl) > 0 ? '<span class="tag good">win</span>' : num(r.net_pnl) < 0 ? '<span class="tag">loss</span>' : '<span class="tag">flat</span>') }
-      ], rows: tripRows, rowAttrs: r => (r.open ? 'title="Still open"' : ''), emptyText: 'No round trips yet' }) + '</section>';
-    } else if (tab === 'flows') {
-      body.innerHTML = `<section class="panel"><div class="panel-head"><h2>Deposits & withdrawals</h2><span class="meta">Newest first</span></div><div class="stat-grid" style="border-bottom:1px solid var(--line)"><div class="stat"><span>Total deposits</span><span class="pos">${usdFull(d.summary.deposits)}</span></div><div class="stat"><span>Total withdrawals</span><span class="neg">${usdFull(d.summary.withdrawals)}</span></div>${num(d.summary.payouts_received) > 0 ? `<div class="stat"><span title="Transfers from Perpl's protocol balance to this account, such as rebates or rewards">Paid by the protocol</span><span class="pos">${usdFull(d.summary.payouts_received)}</span></div>` : ''}${num(d.summary.swept_to_protocol) > 0 ? `<div class="stat"><span title="Transfers from this account into Perpl's protocol balance">Moved to the protocol</span><span class="neg">${usdFull(d.summary.swept_to_protocol)}</span></div>` : ''}</div>` + table({ id: 'flows', columns: [
-        { key: 't', label: 'Time (UTC)', render: r => { const t = dateTime(r.ts); return `<span class="muted num"><span class="yr">${t.slice(0, 5)}</span>${t.slice(5)}</span>`; } },
-        { key: 'k', label: 'Type', render: r => `<span class="${FLOW_KIND[r.kind]?.[1] ?? ''}">${FLOW_KIND[r.kind]?.[0] ?? esc(r.kind)}</span>` },
-        { key: 'a', label: 'Amount', n: true, render: r => usdFull(r.amount) },
-        { key: 'b', label: 'Balance after', phone: false, n: true, render: r => usdFull(r.balance_after) },
-        { key: 'tx', label: 'Tx', phone: false, render: r => `<a class="faint mono" href="${EXPLORER}/tx/${esc(r.tx)}" target="_blank" rel="noopener noreferrer">${esc(r.tx.slice(0, 10))}…</a>` }
-      ], rows: d.flows, emptyText: 'No deposits or withdrawals indexed' }) + '</section>';
-    }
+      if (an) paint(tripsTab());
+      else { if (opened) body.innerHTML = `<section class="panel" id="trip-list">${FRAME.trips()}</section>`; if (anFailed) analyticsFailed(); }
+    } else if (tab === 'flows') paint(flowsTab(d));
   }
   // Daily net PnL as a calendar (weeks × weekdays, UTC), green and red by
   // size relative to the largest day; the last weeks with activity, as many
@@ -253,14 +307,18 @@ export function mount(el, { params, query, setQuery, navigate }) {
   function pnlHead(rows, note = '', keys = []) {
     const v = $('pnl-v'), lg = $('pnl-lg');
     const since = data.summary.first_trade ?? rows[0]?.t;
-    if (v) v.innerHTML = `<div class="hv">${pnl(data.summary.net_pnl)}</div><div class="hn">${note || `all-time, after fees${since ? ` · since ${esc(date(since))}` : ''}`}</div>`;
+    morph(v, `<div class="hv">${pnl(data.summary.net_pnl)}</div><div class="hn">${keepDots(note || `all-time, after fees${since ? ` · since ${esc(date(since))}` : ''}`)}</div>`);
     // ring: a key colour too faint to see on the card as a bare dot gets an outline.
-    if (lg) lg.innerHTML = keys.map(s => `<span><i style="background:${s.color}${s.ring ? ';box-shadow:inset 0 0 0 1px rgba(255,255,255,0.28)' : ''}"></i>${esc(s.name)}</span>`).join('');
+    morph(lg, keys.map(s => `<span><i style="background:${s.color}${s.ring ? ';box-shadow:inset 0 0 0 1px rgba(255,255,255,0.28)' : ''}"></i>${esc(s.name)}</span>`).join(''));
   }
   function drawPnl() {
     const node = $('pnl-chart');
     if (!node) return;
-    const rows = data.pnl_daily ?? [];
+    const rows = data.pnl_daily ?? [], newest = rows.at(-1);
+    // A refresh with nothing new leaves the chart, the calendar and their notes as they are.
+    const drawn = `${pnlMode}:${rows.length}:${newest?.t}:${newest?.cumulative}:${newest?.trades}:${data.summary.net_pnl}`;
+    if (node.__drawn === drawn) return;
+    node.__drawn = drawn;
     if (!rows.length) { pnlHead(rows); node.innerHTML = empty('No realized PnL yet'); return; }
     if (pnlMode === 'calendar') {
       node.__chart?.dispose(); node.__chart = null; node.innerHTML = '';
@@ -272,9 +330,8 @@ export function mount(el, { params, query, setQuery, navigate }) {
     }
     if (pnlMode === 'daily') {
       const days = rows.filter(r => r.trades).map(r => num(r.net_pnl) ?? 0);
-      pnlHead(rows, days.length ? `best day ${pnl(Math.max(...days))} · worst day ${pnl(Math.min(...days))}` : '', DAY_KEYS);
+      pnlHead(rows, days.length ? `best day ${pnlShort(Math.max(...days))} · worst day ${pnlShort(Math.min(...days))}` : '', DAY_KEYS);
     } else pnlHead(rows);
-    if (!node.__chart) node.innerHTML = '';
     if (pnlMode === 'cumulative') {
       const last = num(rows.at(-1).cumulative);
       // One point per calendar day (days without closes carry the total), so gaps look like gaps in time.
@@ -289,15 +346,29 @@ export function mount(el, { params, query, setQuery, navigate }) {
       signedBars(node, { times: days.map(d => d * 86400), values: days.map(d => byDay.get(d) ?? null), bucketSeconds: 86400, name: 'Net PnL' });
     }
   }
-  async function loadTrades() {
-    const r = await get(`wallets/${encodeURIComponent(data.account.address)}/trades?limit=100${next ? `&before=${next}` : ''}`, { maxAge: 0 });
-    if (!alive) return;
-    trades.push(...r.rows); next = r.next;
-    renderTrades();
+  // first: a fresh first page in place of what the list holds. One request at a time,
+  // so a second press of Load more cannot fetch the same page twice.
+  async function loadTrades({ first = false } = {}) {
+    if (tradesBusy) return;
+    tradesBusy = true;
+    const more = $('more'); if (more) more.disabled = true;
+    try {
+      const r = await get(`wallets/${encodeURIComponent(data.account.address)}/trades?limit=100${next && !first ? `&before=${next}` : ''}`, { maxAge: 0 });
+      if (!alive) return;
+      trades = first ? r.rows : [...trades, ...r.rows]; next = r.next;
+      renderTrades();
+    } finally {
+      tradesBusy = false;
+      if (alive && $('more')) $('more').disabled = false;
+    }
+  }
+  function openTrades() {
+    stopTrades?.();
+    stopTrades = keepTrying(() => loadTrades(), { alive: () => alive && tab === 'trades' && !trades.length, fail: () => panelError($('trade-list'), 'Could not load trades.', () => loadTrades()) });
   }
   function renderTrades() {
     const list = $('trade-list'); if (!list) return;
-    list.innerHTML = table({ id: 'tr', compact: true, columns: TRADE_COLS, rows: trades, emptyText: 'No trades' });
+    fill(list, table({ id: 'tr', compact: true, columns: TRADE_COLS, rows: trades, emptyText: 'No trades' }));
     $('trade-count').textContent = `${int(trades.length)} shown`;
     $('more').hidden = !next;
   }
@@ -308,73 +379,133 @@ export function mount(el, { params, query, setQuery, navigate }) {
   const periodLabel = r => {
     if (!r.window.endsWith('_epoch')) return PERIOD_LABEL[r.window] ?? esc(r.window);
     const live = r.window === 'this_epoch', blocks = r.blocks?.first ? ` title="Perpl activity from block ${int(r.blocks.first)} to block ${int(r.blocks.last)}"` : '';
-    const csv = r.trades ? `<a class="icon-btn ep-csv" href="/api/v1/wallets/${encodeURIComponent(periods.account.address ?? periods.account.id)}/trades?format=csv&from=${r.from}&to=${r.to}" download title="This account's fills in the epoch, as CSV (up to 100,000)" aria-label="Download the epoch's fills as CSV">${ICON.download}</a>` : '';
+    const csv = r.trades ? `<a class="icon-btn ep-csv" href="/api/v1/wallets/${encodeURIComponent(periods.account.address ?? periods.account.id)}/trades?format=csv&from=${r.from}&to=${r.to}" download title="This trader's fills in the epoch, as CSV (up to 100,000)" aria-label="Download the epoch's fills as CSV">${ICON.download}</a>` : '';
     // Phones get a short form on two lines ("Sep 23–30", "1h 41m left"); the group header names 16:00 UTC.
     const d = ts => new Date(ts * 1000), end = d(r.from + 7 * 86400), mon = x => x.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
     const short = `${mon(d(r.from))} ${d(r.from).getUTCDate()}–${mon(end) === mon(d(r.from)) ? '' : `${mon(end)} `}${end.getUTCDate()}`;
     const left = epochLeft(r.from), both = (long, brief) => `<span class="ep-long">${long}</span><span class="ep-short">${brief}</span>`;
-    return `<span class="ep-name">${PERIOD_LABEL[r.window]}${csv}</span><div class="sub ep-sub"${blocks}>${both(epochSpan(r.from), short)}<span class="ep-state"><span class="ep-dot"> · </span>${live ? both(`snapshot in ${left}`, `${left} left`) : 'final'}</span></div>`;
+    return `<span class="ep-name">${PERIOD_LABEL[r.window]}${csv}</span><div class="sub ep-sub"${blocks}>${both(epochSpan(r.from), short)}<span class="ep-state"><span class="ep-dot"> · </span>${live ? both(`ends in ${left}`, `${left} left`) : 'final'}</span></div>`;
   };
   // Epochs first (the rows people come for on snapshot day), then the rolling windows.
   const periodRows = () => { const ps = periods.periods, ep = ps.filter(p => p.window.endsWith('_epoch')), roll = ps.filter(p => !p.window.endsWith('_epoch')); return [...(ep.length ? [{ group: 'Perpl epochs · snapshot every Wednesday 16:00 UTC' }, ...ep] : []), { group: 'Rolling windows' }, ...roll]; };
-  const rankCell = (n, of) => (n ? `<span class="rank-pill${n <= 10 ? ' lead' : ''}">#${int(n)}</span><span class="faint rank-of">of ${int(of)}</span>` : '<span class="faint">—</span>');
+  const rankCell = (n, of) => (n ? `<span class="rank-pill${n <= 10 ? ' lead' : ''}">#${int(n)}</span><span class="faint rank-of">of ${int(of)}</span>` : DASH);
   function periodsTable() {
     return table({ id: 'periods', compact: true, columns: [
-      { key: 'w', label: 'Period', render: r => `${periodLabel(r)}${r.coverage_complete ? '' : ' <span class="tag warn" title="History for this window is still being indexed">partial</span>'}` },
-      { key: 'v', label: 'Volume', n: true, render: r => (r.trades ? `${usd(r.volume)}${r.window.endsWith('_epoch') && r.volume_share_pct !== null && r.volume_share_pct !== undefined ? `<span class="note" title="Share of the exchange volume in the epoch (each trade has two sides)">${pct(r.volume_share_pct, { digits: r.volume_share_pct < 1 ? 2 : 1 })} of volume</span>` : ''}` : '<span class="faint">—</span>') },
-      { key: 'mk', label: 'Maker share', tip: 'Share of the volume where this account was the maker', phone: false, n: true, render: r => (r.trades && r.maker_share_pct !== null && r.maker_share_pct !== undefined ? `<span title="${usd(r.maker_volume)} as maker · ${usd(r.taker_volume)} as taker">${pct(r.maker_share_pct, { digits: 0 })}</span>` : '<span class="faint">—</span>') },
+      { key: 'w', label: 'Period', render: r => `${periodLabel(r)}${r.coverage_complete ? '' : ' <span class="tag warn" title="History for this period is still being indexed">partial</span>'}` },
+      { key: 'v', label: 'Volume', n: true, render: r => (r.trades ? `${amount(r.volume)}${r.window.endsWith('_epoch') && r.volume_share_pct !== null && r.volume_share_pct !== undefined ? `<span class="note" title="Share of the exchange volume in the epoch (each trade has two sides)">${share(r.volume_share_pct, { digits: r.volume_share_pct < 1 ? 2 : 1 })} of volume</span>` : ''}` : DASH) },
+      { key: 'mk', label: 'Maker share', tip: 'Share of this trader\'s volume filled as maker', phone: false, n: true, render: r => (r.trades && r.maker_share_pct !== null && r.maker_share_pct !== undefined ? `<span title="${usd(r.maker_volume)} as maker · ${usd(r.taker_volume)} as taker">${pct(r.maker_share_pct, { digits: 0 })}</span>` : DASH) },
       { key: 't', label: 'Trades', phone: false, n: true, render: r => (r.trades ? int(r.trades) : '<span class="faint">0</span>') },
-      { key: 'f', label: 'Fees', tip: 'Fees paid on fills', phone: false, n: true, render: r => (r.trades ? usd(r.fees) : '<span class="faint">—</span>') },
-      { key: 'p', label: 'Net PnL', n: true, render: r => (r.trades ? pnl(r.net_pnl) : '<span class="faint">—</span>') },
-      { key: 'e', label: 'PnL / volume', tip: 'Net PnL per dollar traded, in basis points; shown from $1K of volume in the period', phone: false, n: true, render: r => ratioCell(r.pnl_per_volume_bps, r.volume) },
+      { key: 'f', label: 'Fees paid', tip: 'Trading and liquidation fees paid in the period', phone: false, n: true, render: r => (r.trades ? amount(r.fees) : DASH) },
+      { key: 'p', label: 'Net PnL', n: true, render: r => (r.trades ? pnlShort(r.net_pnl) : DASH) },
+      { key: 'e', label: 'PnL / volume', tip: 'Net PnL as a share of volume. 10 bps is $1 per $1,000 traded. Shown from $1K of volume.', phone: false, n: true, render: r => ratioCell(r.pnl_per_volume_bps, r.volume) },
       { key: 'rp', label: 'Rank by PnL', n: true, render: r => rankCell(r.rank?.pnl, r.rank?.of) },
       { key: 'rv', label: 'Rank by volume', phone: false, n: true, render: r => (r.rank?.volume_to_next ? `<span title="${usd(r.rank.volume_to_next)} more volume to reach #${int(r.rank.next_rank)}">${rankCell(r.rank.volume, r.rank.of)}</span>` : rankCell(r.rank?.volume, r.rank?.of)) }
     ], rows: periodRows() });
   }
-  const loadPeriods = () => get(`wallets/${encodeURIComponent(key)}/periods`, { maxAge: 20000 }).then(p => { if (!alive) return; periods = p; const n = $('periods'); if (n) n.innerHTML = periodsTable(); markPartial(); }).catch(() => { const n = $('periods'); if (n && !periods) n.innerHTML = empty('Period totals unavailable'); });
-
-  // While history is indexing, the header's all-time figures say so.
-  function markPartial() {
-    const all = periods?.periods?.find(x => x.window === 'all');
-    const sub = el.querySelector('.wallet-id .sub:last-child');
-    if (all && all.coverage_complete === false && sub && !sub.querySelector('.tag')) sub.insertAdjacentHTML('beforeend', ' <span class="tag warn" title="Wallet history is still being indexed, so all-time totals are incomplete">partial history</span>');
-  }
+  const periodsError = () => panelError($('periods'), 'Could not load period totals.', () => loadPeriods(0));
+  const loadPeriods = (maxAge = 20000) => {
+    const asked = ++periodSeq;
+    return get(`wallets/${encodeURIComponent(key)}/periods`, { maxAge }).then(p => {
+      if (!alive || asked !== periodSeq || p === periods) return;
+      periods = p; periodsFailed = false;
+      fill($('periods'), periodsTable());
+      morph($('w-head'), head(data)); // an indexing history says so in the header
+    }, error => {
+      if (!alive || asked !== periodSeq || periods) return;
+      periodsFailed = true; periodsError();
+      throw error;
+    });
+  };
   function insightsHtml() {
     return `<div class="insights">${an.insights.length ? an.insights.map(i => `<div class="insight"><span class="tag accent">${esc(i.tag)}</span><span>${esc(i.text)}</span></div>`).join('') : '<span class="faint">Not enough closed trades yet.</span>'}</div>
-      <div class="panel-head" style="min-height:32px;padding-top:0"><h2 style="font-size:12.5px;color:var(--text-2);font-weight:500">Activity by weekday and hour (UTC)</h2></div>${heatmap(an.activity ?? [])}`;
+      <div class="w-subhead"><h2>Activity by weekday and hour (UTC)</h2></div>${heatmap(an.activity ?? [])}`;
   }
   // Analytics arrive after the page: fill the waiting parts in place.
-  function applyAnalytics() {
-    if (!data || !an) return;
-    const row = $('kpi-row'); if (row) row.innerHTML = kpis(data);
-    const perf = $('perf'); if (perf) perf.innerHTML = perfPanel(an.performance, data.summary);
-    const ins = $('insights'); if (ins) ins.innerHTML = insightsHtml();
+  function fillAnalytics() {
     const since = cutSince() ? ` · <span class="cut-since"${cutTitle()}>since ${cutSince()}</span>` : '';
-    const pm = $('perf-meta'); if (pm) pm.innerHTML = `Closed round trips, net of fees${since}`;
-    const im = $('ins-meta'); if (im) im.innerHTML = `Rule-based, from this wallet's trades${since}`;
-    if (tab === 'trips' || tab === 'overview') renderTab();
+    morph($('perf-meta'), keepDots(`Closed round trips, net of fees${since}`));
+    morph($('ins-meta'), keepDots(`Rule-based, from this wallet's trades${since}`));
+    if (an) { fill($('perf'), perfPanel(an.performance, data.summary)); fill($('insights'), insightsHtml()); } else if (anFailed) analyticsFailed();
   }
-  const loadAnalytics = () => get(`wallets/${encodeURIComponent(key)}/analytics`, { maxAge: 20000 }).then(a => { if (!alive) return; an = a; applyAnalytics(); }).catch(() => {});
-  get(`wallets/${encodeURIComponent(key)}`, { maxAge: 3000 }).then(d => { if (!alive) return; data = d; render(); loadAnalytics(); loadPeriods(); }).catch(error => {
-    el.innerHTML = `<div class="page-head"><div><div class="sub"><a href="/traders">Traders</a> / Wallet</div><h1 class="mono">${esc(short(key))}</h1></div></div><section class="panel">${empty(error.status === 404 ? 'No Perpl account for this address (checked in the index and on the contract).' : `Could not load wallet (${error.message})`)}</section>`;
-  });
-  function refresh() { if (!data || tab === 'trades') return; get(`wallets/${encodeURIComponent(key)}`, { maxAge: 0 }).then(d => { if (!alive) return; data = d; const scroll = window.scrollY; render(); window.scrollTo({ top: scroll }); loadAnalytics(); loadPeriods(); }).catch(() => {}); }
+  function analyticsFailed() {
+    const retry = () => loadAnalytics(0);
+    panelError($('perf'), 'Could not load round trips.', retry);
+    panelError($('insights'), 'Could not load round trips.', retry);
+    panelError($('trip-list'), 'Could not load round trips.', retry);
+  }
+  const loadAnalytics = (maxAge = 20000) => {
+    const asked = ++anSeq;
+    return get(`wallets/${encodeURIComponent(key)}/analytics`, { maxAge }).then(a => {
+      if (!alive || asked !== anSeq || a === an) return;
+      an = a; anFailed = false;
+      morph($('kpi-row'), kpis(data));
+      if (tab === 'overview') { fillAnalytics(); morph($('mk-body'), marketTable(data)); } else if (tab === 'trips') renderTab();
+    }, error => {
+      if (!alive || asked !== anSeq || an) return; // what the page holds stays
+      anFailed = true;
+      morph($('kpi-row'), kpis(data));
+      analyticsFailed();
+      throw error;
+    });
+  };
+  // A wallet that does not exist has nothing to wait for; any other failure keeps trying.
+  function walletFailed() {
+    failed = true; shown = null;
+    morph($('w-head'), head(null));
+    morph($('kpi-row'), `<div class="kpis k7">${['Account value', 'Unrealized PnL', 'Net PnL · all-time', 'Win rate', 'Profit factor', 'Volume · all-time', 'Max drawdown'].map(label => kpi({ label, value: DASH })).join('')}</div>`);
+    const body = $('tab-body');
+    if (!body.querySelector('#w-fail')) body.innerHTML = '<section class="panel w-fail" id="w-fail"></section>';
+    panelError($('w-fail'), 'Could not load this wallet.', open);
+  }
+  async function open() {
+    let d;
+    try { d = await get(`wallets/${encodeURIComponent(key)}`, { maxAge: 3000 }); } catch (error) {
+      if (!alive || data) return;
+      if (error.status !== 404 && error.status !== 400) throw error;
+      missing = true;
+      el.innerHTML = `<div class="page-head"><div><div class="sub"><a href="/traders">Traders</a> / Wallet</div><h1 class="mono">${esc(short(key))}</h1></div></div><section class="panel">${empty(error.status === 404 ? 'No Perpl account for this address (checked in the index and on the contract).' : error.message)}</section>`;
+      return;
+    }
+    if (!alive || data) return;
+    data = d; failed = false;
+    render();
+    stopAnalytics = keepTrying(loadAnalytics, { alive: () => alive && !an });
+    stopPeriods = keepTrying(loadPeriods, { alive: () => alive && !periods });
+  }
+  const stopOpen = keepTrying(open, { alive: () => alive && !data && !missing, fail: walletFailed });
+  // Also called by the router: { stale } after a page opened on cached answers, when
+  // every answer must come from the network, the trade list's as well.
+  function refresh({ stale = false } = {}) {
+    if (missing) return;
+    if (!data) { open().catch(() => {}); return; }
+    if (tab === 'trades' && !stale) return;
+    const asked = ++seq;
+    get(`wallets/${encodeURIComponent(key)}`, { maxAge: 0 }).then(d => {
+      if (!alive || asked !== seq) return;
+      data = d;
+      render();
+      loadAnalytics(stale ? 0 : undefined).catch(() => {});
+      loadPeriods(stale ? 0 : undefined).catch(() => {});
+      if (stale && tab === 'trades') loadTrades({ first: true }).catch(() => {});
+    }).catch(() => {});
+  }
   // Marks move uPnL continuously: poll. A trade or liquidation of this account refreshes at once.
-  const timer = setInterval(refresh, 20000);
+  const timer = setInterval(() => refresh(), 20000);
   let pending = null;
   const mine = rows => data && rows.some(r => String(r.account) === String(data.account.id));
   const soon = () => { if (!pending) pending = setTimeout(() => { pending = null; refresh(); }, 1200); };
   const off = [stream.on('trades', rows => { if (mine(rows)) soon(); }), stream.on('liquidations', rows => { if (mine(rows)) soon(); })];
   return {
+    refresh,
     onTab(name, v) { if (name !== 'tab') return; tab = v; showTab(); setQuery({ tab: v === 'overview' ? null : v }); },
     onAction(a) {
       if (a === 'pnl-cum' || a === 'pnl-daily' || a === 'pnl-cal') { pnlMode = { 'pnl-cum': 'cumulative', 'pnl-daily': 'daily', 'pnl-cal': 'calendar' }[a]; el.querySelectorAll('[data-action^="pnl-"]').forEach(b => b.classList.toggle('on', b.dataset.action === a)); drawPnl(); }
-      if (a === 'more') loadTrades().catch(() => {});
+      if (a === 'more') loadTrades().catch(() => { if (alive) toast('Could not load more trades'); });
       if (a === 'share' && data) { if (!an) toast('Analytics still loading; card uses totals only'); shareCard(); }
-      if (a === 'watch' && data) { const on = watch.toggle(data.account.address, `#${data.account.id}`); toast(on ? 'Added to watchlist' : 'Removed from watchlist'); render(); }
+      if (a === 'watch' && data) { const on = watch.toggle(data.account.address, `#${data.account.id}`); toast(on ? 'Added to watchlist' : 'Removed from watchlist'); morph($('w-head'), head(data)); }
       if (a === 'compare' && data) { let list = []; try { list = JSON.parse(sessionStorage.getItem('ps.compare') || '[]'); } catch { list = []; } if (!list.includes(data.account.address)) list.push(data.account.address); list = list.slice(-5); try { sessionStorage.setItem('ps.compare', JSON.stringify(list)); } catch { /* storage unavailable */ } navigate('/compare', { w: list.join(',') }); }
     },
-    update(q) { const t = TABS.some(([v]) => v === q.get('tab')) ? q.get('tab') : 'overview'; if (t !== tab) tab = t; if (data) renderTab(); },
-    destroy() { alive = false; clearInterval(timer); clearTimeout(pending); off.forEach(f => f()); }
+    update(q) { const t = TABS.some(([v]) => v === q.get('tab')) ? q.get('tab') : 'overview'; if (t !== tab) { tab = t; showTab(); } if (data) renderTab(); else if (!failed && !missing) $('tab-body').innerHTML = frames(); },
+    destroy() { alive = false; clearInterval(timer); clearTimeout(pending); off.forEach(f => f()); [stopOpen, stopAnalytics, stopPeriods, stopTrades].forEach(stop => stop?.()); }
   };
 }
