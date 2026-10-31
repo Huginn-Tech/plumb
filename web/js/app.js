@@ -217,25 +217,47 @@ document.addEventListener('keydown', e => { if (e.key === '/' && !['INPUT', 'TEX
 
 // --- live status + banner -----------------------------------------------------------------
 const live = document.getElementById('live'), liveText = document.getElementById('live-text'), banner = document.getElementById('banner');
-let lastBlock = null, lastBlockAt = 0, streamOpen = true;
+let lastBlock = null, polledBlock = null, lastBlockAt = Date.now(), lostAt = Date.now(), streamOpen = false, apiDown = false;
 live.querySelector('.dot').insertAdjacentHTML('afterend', `<span class="live-ico">${ICON.cube}</span>`);
-function setLive(state, text) { live.classList.remove('ok', 'warn', 'bad'); live.classList.add(state); liveText.textContent = text; }
-// The pill shows the latest finalized block. A stream that drops and
-// reconnects within a few seconds (a deploy, a proxy hiccup) keeps the pill
-// steady; it warns only when blocks actually stop arriving.
-const RECONNECT_GRACE_MS = 4000, DELAYED_MS = 15000;
-function renderLive() {
-  if (!lastBlock) return;
-  const since = Date.now() - lastBlockAt, lost = !streamOpen && since > RECONNECT_GRACE_MS, delayed = since > DELAYED_MS;
-  if (lost) setLive('warn', 'Reconnecting…'); else setLive(delayed ? 'warn' : 'ok', `${delayed ? 'Delayed · ' : ''}#${int(lastBlock.block)}`);
+function setLive(state, text, note) {
+  live.classList.remove('ok', 'warn', 'bad'); live.classList.add(state);
+  if (liveText.textContent !== text) liveText.textContent = text;
   // Once hovered, the note lives in data-tip (ui.js): update it there, so the
   // browser's own tooltip is not brought back every second.
-  const note = lost ? 'Live connection lost; reconnecting' : delayed ? `No new block for over ${DELAYED_MS / 1000} seconds` : 'Latest finalized block indexed';
   if (live.dataset.tip) live.dataset.tip = note; else live.title = note;
 }
+const clock = ms => `${new Date(ms).toISOString().slice(11, 19)} UTC`;
+// The pill shows the latest finalized block. A stream that drops and reconnects
+// within a few seconds (a deploy, a proxy hiccup), or that has not opened yet, keeps
+// the pill steady. After that it says what is wrong; Offline outranks the rest, as
+// nothing can be fetched then. The figures on the page are as old as the last block.
+const RECONNECT_GRACE_MS = 4000, DELAYED_MS = 15000;
+const streamLost = () => !streamOpen && Date.now() - lostAt > RECONNECT_GRACE_MS;
+function renderLive() {
+  const block = lastBlock?.block ?? polledBlock, since = Date.now() - lastBlockAt, minutes = Math.floor(since / 60000);
+  if (apiDown) setLive('bad', 'Offline', 'The data service is not answering');
+  else if (streamLost()) setLive('warn', 'Reconnecting…', lastBlock ? `Live connection lost. Last block at ${clock(lastBlockAt)}; figures are from then.` : 'No live connection; reconnecting');
+  else if (!block) return;
+  else if (since > DELAYED_MS) setLive('warn', `Delayed${minutes ? ` ${minutes}m` : ''} · #${int(block)}`, `No new block since ${clock(lastBlockAt)}. Figures are from then.`);
+  else setLive('ok', `Live · #${int(block)}`, 'Latest finalized block indexed');
+}
 stream.on('block', b => { lastBlock = b; lastBlockAt = Date.now(); renderLive(); });
-stream.on('status', s => { streamOpen = s === 'open'; renderLive(); });
+// A stream that has not opened or has dropped is checked once the grace time is over:
+// Offline if the API has gone with it. The status event repeats on every browser
+// retry; only the first starts the wait.
+const checkLoss = () => setTimeout(poll, RECONNECT_GRACE_MS + 50);
+let lossCheck = checkLoss();
+stream.on('status', s => {
+  const open = s === 'open';
+  if (open) clearTimeout(lossCheck); else if (streamOpen) { lostAt = Date.now(); lossCheck = checkLoss(); }
+  streamOpen = open;
+  renderLive();
+});
 setInterval(renderLive, 1000);
+// A view's refresh() brings its panels up to date when the stream or the API returns,
+// and stands in for the pushes while the stream is out.
+const refreshView = () => current?.instance?.refresh?.({ stale: false });
+stream.on('resumed', refreshView);
 function showBanner(p) {
   if (!p || (!p.running && !(p.pct < 100 && p.total_blocks !== '0'))) { banner.hidden = true; return; }
   const eta = p.eta_s ? (p.eta_s > 3600 ? `${Math.floor(p.eta_s / 3600)}h ${Math.round(p.eta_s % 3600 / 60)}m` : `${Math.max(1, Math.round(p.eta_s / 60))}m`) : '—';
@@ -259,15 +281,23 @@ function renderTicker(markets) {
 }
 stream.on('protocol', p => renderTicker(p.markets));
 get('protocol?window=24h', { maxAge: 5000 }).then(p => renderTicker(p.markets)).catch(() => {});
+// Every 30 s; 15 s while the stream is out; 5 s while the API is not answering.
+let pollTimer = null;
 async function poll() {
+  const wasDown = apiDown;
   try {
     const h = await get('health', { maxAge: 0 });
+    apiDown = false;
     showBanner(h.index?.backfill);
     setAlertsBot(h.alerts?.bot);
-    if (!lastBlockAt && h.index?.live?.to) setLive('ok', `#${int(h.index.live.to)}`);
-  } catch { setLive('bad', 'Offline'); }
+    polledBlock = h.index?.live?.to ?? polledBlock;
+  } catch (error) { if (error.status !== 429) apiDown = true; } // the rate limit is not an outage
+  renderLive();
+  if (!apiDown && (wasDown || streamLost())) refreshView();
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(poll, apiDown ? 5000 : streamLost() ? 15000 : 30000);
 }
-poll(); setInterval(poll, 30000);
+poll();
 stream.connect();
 // The first view renders at once (colours are seeded in ui.js); the market list
 // then confirms each market's colour for the views that follow.
