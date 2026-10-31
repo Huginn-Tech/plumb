@@ -17,6 +17,8 @@ const DEFAULT_WINDOW = '24h';
 const segSm = (name, options, active) => seg(name, options, active).replace('class="seg"', 'class="seg sm"');
 // Rows in the two lists of the Activity row.
 const LIST_ROWS = 8;
+// Below these widths a row no longer shares its height with the panel beside it.
+const stacked = width => matchMedia(`(max-width: ${width}px)`).matches;
 const windowOf = q => (WINDOWS.some(([v]) => v === q.get('window')) ? q.get('window') : DEFAULT_WINDOW);
 const savedMinSize = () => { try { const v = localStorage.getItem('ps.minsize'); return MIN_SIZES.some(([x]) => x === v) ? v : '100'; } catch { return '100'; } };
 // What the API says goes unprinted (panelError has its own words); a bug in this file does not.
@@ -93,11 +95,11 @@ export function mount(el, { query, setQuery }) {
       <div class="grid g-3 aligned">
         <section class="panel"><div class="panel-head"><h2>Latest liquidations</h2><a class="meta" id="liq-link" href="${liqPage(w)}">View all →</a></div><div class="panel-body flush" id="liqs">${skRows(LIST_ROWS, 38, 34)}</div></section>
         <section class="panel"><div class="panel-head"><h2>Wallet flows</h2><div id="flowview">${segSm('flowv', FLOW_VIEWS, flowView)}</div></div><div class="panel-body flush" id="flowlist">${skRows(LIST_ROWS, 38, 34)}</div></section>
-        <section class="panel fill"><div class="panel-head"><h2>By period</h2><span class="meta">Exchange totals</span></div><div class="panel-body flush fill-table" id="windows">${skRows(4, 76, 34, 38)}</div></section>
+        <section class="panel fill"><div class="panel-head"><h2>By period</h2><span class="meta">Exchange totals</span></div><div class="panel-body flush fill-table" id="windows">${skRows(4, stacked(1100) ? 48 : 76, 34, 48)}</div></section>
       </div>
       <div class="section-label">Market share</div>
       <div class="grid g-2" id="landscape-grid">
-        <section class="panel fill"><div class="panel-head"><div><h2>Perps on Monad</h2><div class="desc">Open interest by venue</div></div><span class="meta" id="ls-chain-meta"></span></div><div class="panel-body flush fill-table ls-table" id="ls-chain">${skRows(3, 76, 34, 38)}</div></section>
+        <section class="panel fill"><div class="panel-head"><div><h2>Perps on Monad</h2><div class="desc">Open interest by venue</div></div><span class="meta" id="ls-chain-meta"></span></div><div class="panel-body flush fill-table ls-table" id="ls-chain">${skRows(3, stacked(860) ? 38 : 76, 34)}</div></section>
         <section class="panel"><div class="panel-head"><div><h2>Among all perps</h2><div class="desc">Open interest by venue</div></div><span class="meta" id="ls-meta"></span></div><div class="panel-body flush ls-table" id="ls-all">${skRows(6, 38, 34)}</div></section>
       </div>
     </div>`;

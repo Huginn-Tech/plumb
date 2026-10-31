@@ -870,7 +870,12 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
   .lq-chart .head-right { flex: 1 1 100%; justify-content: space-between; }
   .lq-chart .legend.dots { justify-content: flex-start; margin-top: 0; }
   .lq-feed-ctl { flex: 1 1 100%; flex-wrap: wrap; row-gap: 8px; }
-  .lq-feed-ctl .meta { flex: 1 1 100%; }
+  .lq-feed-ctl .meta { flex: 1 1 100%; min-height: 17.4px; }
+  /* Everything that wraps here has its place before it lands: a two-line card label, the key, the pager. */
+  .keep-delta.k4 .kpi:nth-child(-n+2) .kpi-label { min-height: 36px; }
+  .lq-chart > .panel-head { min-height: 119.1px; }
+  .lq-feed .panel-foot.pager:empty { min-height: 76.4px; }
+  .lq-feed { scroll-margin-top: 112px; }
 }
 
 /* Status: stage figures in the page's type scale; dividers follow the grid when it wraps. */
@@ -931,6 +936,14 @@ td.mkt-cell { position: relative; }
 @media (min-width: 1101px) { #main-chart { height: 312px; } }
 /* By period: two lines beside rows of one, all on the row's middle. Each of its rows is two of its neighbours'. */
 #windows .t td { vertical-align: middle; }
+/* Keys and sources take more lines on narrow screens: their place is kept before they land. */
+@media (max-width: 860px) { .panel-head.vol-keys { min-height: 61px; } }
+@media (max-width: 640px) {
+  .panel-head.vol-keys { min-height: 91px; }
+  #flows-lg:empty, #traders-lg:empty, #fees-lg:empty, #taker-lg:empty { display: block; min-height: 17.4px; }
+  #liq-lg:empty { display: block; min-height: 38.8px; }
+  #landscape-grid .panel-head { min-height: 98px; }
+}
 /* A card that could not load keeps the look of the cards. */
 .kpis > .panel-error { background: var(--surface); border-radius: var(--radius); box-shadow: var(--card-edge); }
 /* ========== end page: overview ========== */
