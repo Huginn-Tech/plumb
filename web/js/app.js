@@ -2,7 +2,7 @@
 // server-sent event stream and the indexing banner.
 import { get, stream, openStale, closeStale } from './api.js';
 import { esc, short, int, dateTime, price, pct, signClass } from './format.js';
-import { watch, toast, ICON, assignColors, download, logo, setAlertsBot, go, panelError } from './ui.js';
+import { watch, toast, ICON, assignColors, download, logo, setAlertsBot, go, panelError, resolveWallet } from './ui.js';
 import { disposeAll, chartCsv, chartPng } from './charts.js';
 
 // Path, view, and the page's name in the tab title (a function of the path's params).
@@ -173,29 +173,44 @@ document.addEventListener('click', event => {
 });
 
 // --- search ------------------------------------------------------------------------------
-const input = document.getElementById('search'), results = document.getElementById('search-results');
+const input = document.getElementById('search'), results = document.getElementById('search-results'), searchBox = input.closest('.search');
 let searchTimer = null, selected = -1;
 function openResult(key) { results.hidden = true; input.value = ''; input.blur(); navigate(`/wallet/${key}`); }
+const showResults = html => { results.innerHTML = html; results.hidden = false; };
+const searchNote = text => showResults(`<div class="empty">${esc(text)}</div>`);
+// The answer to q, unless the box has moved on while it was on its way.
+const resolved = async q => {
+  try { const r = await resolveWallet(q); return input.value.trim() === q ? r : null; } catch { if (input.value.trim() === q) searchNote('Search unavailable'); return null; }
+};
 input.addEventListener('input', () => {
   clearTimeout(searchTimer);
   const q = input.value.trim();
   if (!q) { results.hidden = true; return; }
   searchTimer = setTimeout(async () => {
-    if (!/^(0x[0-9a-fA-F]{1,40}|\d{1,9})$/.test(q)) { results.innerHTML = '<div class="empty">Enter a 0x address (or prefix) or an account ID</div>'; results.hidden = false; return; }
-    try {
-      const r = await get(`search?q=${encodeURIComponent(q)}`, { maxAge: 10000 });
-      selected = -1;
-      results.innerHTML = r.rows.length ? r.rows.map(x => `<a href="/wallet/${esc(x.address)}" data-key="${esc(x.address)}"><span class="mono">${esc(short(x.address))}</span><span class="faint">#${esc(x.account)}</span></a>`).join('') : '<div class="empty">No Perpl account found</div>';
-      results.hidden = false;
-    } catch { results.innerHTML = '<div class="empty">Search unavailable</div>'; results.hidden = false; }
+    const r = await resolved(q);
+    if (!r) return;
+    selected = -1;
+    if (r.rows.length) showResults(r.rows.map(x => `<a href="/wallet/${esc(x.address)}" data-key="${esc(x.address)}"><span class="mono">${esc(short(x.address))}</span><span class="faint">#${esc(x.account)}</span></a>`).join(''));
+    else searchNote(r.note || 'Search unavailable');
   }, 160);
 });
-input.addEventListener('keydown', e => {
+input.addEventListener('keydown', async e => {
   const items = [...results.querySelectorAll('a')];
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); selected = Math.max(0, Math.min(items.length - 1, selected + (e.key === 'ArrowDown' ? 1 : -1))); items.forEach((a, i) => a.classList.toggle('sel', i === selected)); }
-  else if (e.key === 'Enter') { const q = input.value.trim(); if (items[selected]) openResult(items[selected].dataset.key); else if (/^0x[0-9a-fA-F]{40}$/.test(q) || /^\d{1,9}$/.test(q)) openResult(q); else if (items[0]) openResult(items[0].dataset.key); }
-  else if (e.key === 'Escape') { results.hidden = true; input.blur(); }
+  else if (e.key === 'Enter') {
+    const q = input.value.trim();
+    if (items[selected]) { openResult(items[selected].dataset.key); return; }
+    if (!q) return;
+    clearTimeout(searchTimer);
+    const r = await resolved(q);
+    if (!r) return;
+    const key = r.key ?? r.rows[0]?.address;
+    if (key) openResult(key); else searchNote(r.note);
+  }
 });
+searchBox.addEventListener('keydown', e => { if (e.key === 'Escape') { results.hidden = true; input.blur(); } });
+// relatedTarget: a tap on a result may not take focus, and must still land on it.
+searchBox.addEventListener('focusout', e => { if (e.relatedTarget && !searchBox.contains(e.relatedTarget)) results.hidden = true; });
 results.addEventListener('click', e => { const a = e.target.closest('a[data-key]'); if (a) { e.preventDefault(); openResult(a.dataset.key); } });
 document.addEventListener('click', e => { if (!e.target.closest('.search')) results.hidden = true; });
 document.addEventListener('keydown', e => { if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) { e.preventDefault(); input.focus(); } });
