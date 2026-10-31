@@ -157,6 +157,7 @@ button, input, select { font: inherit; color: inherit; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px 12px; min-height: 52px; }
 .panel-head h2 { margin: 0; font-size: 14px; font-weight: 500; letter-spacing: 0; display: flex; align-items: center; gap: 6px; }
 .panel-head .meta { color: var(--text-3); font-size: 12px; }
+@media (min-width: 641px) { .panel-head > h2 { flex: none; } } /* the note beside a title wraps first */
 @media (max-width: 640px) {
   .panel-head { flex-wrap: wrap; }
   .panel-head .meta { flex: 1 1 100%; }
