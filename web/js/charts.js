@@ -17,6 +17,12 @@ const whenLoaded = fn => (el, ...args) => { if (window.echarts || !el) return fn
 const registry = new Set();
 const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(entries => { for (const e of entries) { const c = e.target.__chart; c?.resize(); c?.__refit?.(); } }) : null;
 
+function sweep() {
+  for (const c of registry) {
+    try { const dom = c.getDom(); if (dom?.isConnected) continue; observer?.unobserve(dom); c.dispose(); } catch { /* already gone */ }
+    registry.delete(c);
+  }
+}
 function init(el) {
   if (!el || !window.echarts) return null;
   let chart = el.__chart;
@@ -28,6 +34,7 @@ function init(el) {
     registry.delete(chart); chart = null; el.__chart = null;
   }
   if (!chart) {
+    sweep(); // a re-rendered card leaves its old chart behind with no one to dispose it
     el.replaceChildren(); // a skeleton or message in the node gives way to the chart
     chart = window.echarts.init(el, null, { renderer: 'canvas' });
     chart.__root = el.lastElementChild; // echarts appends its own root
