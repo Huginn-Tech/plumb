@@ -231,6 +231,7 @@ export function mergeByAsset(rows, fields) {
 // The current page's link, and a tab row's open tab when the row first renders,
 // are scrolled to the middle so neither sits off-screen (the edge fades are CSS).
 const nav = document.querySelector('.nav'), seen = new WeakSet();
+const STRIPS = '.table-wrap, .tabs, .nav';
 const centre = (strip, item) => { if (item && strip.scrollWidth > strip.clientWidth) strip.scrollTo({ left: strip.scrollLeft + item.getBoundingClientRect().left - strip.getBoundingClientRect().left - (strip.clientWidth - item.offsetWidth) / 2 }); };
 new MutationObserver(() => centre(nav, nav.querySelector('.active'))).observe(nav, { subtree: true, attributeFilter: ['class'] });
 new MutationObserver(() => document.querySelectorAll('.tabs').forEach(t => { if (!seen.has(t)) { seen.add(t); centre(t, t.querySelector('.on')); } })).observe(document.getElementById('view'), { childList: true, subtree: true });
@@ -241,14 +242,63 @@ window.addEventListener('resize', () => { if (innerWidth !== width) { width = in
 // here: how far each strip hides at either edge, up to 40px, on every scroll and
 // once a frame after the page or the window changes.
 if (!CSS.supports('animation-timeline: scroll()')) {
-  const STRIPS = '.table-wrap, .tabs, .nav';
   const fade = s => { const past = s.scrollWidth - s.clientWidth - s.scrollLeft; s.style.setProperty('--fade-l', `${Math.min(40, Math.max(0, s.scrollLeft))}px`); s.style.setProperty('--fade-r', `${Math.min(40, Math.max(0, past))}px`); };
   let queued = false;
   const soon = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; document.querySelectorAll(STRIPS).forEach(fade); }); };
   document.addEventListener('scroll', e => { if (e.target.matches?.(STRIPS)) fade(e.target); }, true);
   window.addEventListener('resize', soon);
-  new MutationObserver(soon).observe(document.getElementById('view'), { childList: true, subtree: true });
+  new MutationObserver(soon).observe(document.getElementById('view'), { childList: true, subtree: true, characterData: true });
   soon();
+}
+
+// --- regions that wait, fail and refresh -------------------------------------------------
+// Keeps a region's content and height while its next data is on the way: the press
+// shows at once and the page does not move. Returns the release; the latest press
+// owns the hold, so an older press finishing late does not undim a newer one.
+export function hold(node) {
+  if (!node) return () => {};
+  const mine = node.__hold = {};
+  node.style.minHeight = `${node.offsetHeight}px`;
+  node.classList.add('is-stale'); node.setAttribute('aria-busy', 'true');
+  return () => { if (node.__hold !== mine) return; node.__hold = null; node.classList.remove('is-stale'); node.removeAttribute('aria-busy'); node.style.minHeight = ''; };
+}
+
+// Writes new HTML into a region by patching what differs: scroll, focus, an open
+// note and a press in progress all survive a refresh. A row under the pointer keeps
+// its target until release, so a click never lands on the row that moved up.
+let pressedRow = null;
+document.addEventListener('pointerdown', e => { pressedRow = e.target.closest?.('tr') ?? null; }, true);
+const released = () => setTimeout(() => { pressedRow = null; }, 0);
+document.addEventListener('pointerup', released, true);
+document.addEventListener('pointercancel', released, true);
+function patchAttrs(a, b) {
+  for (const { name, value } of b.attributes) {
+    if (name === 'title' && a.hasAttribute('data-tip')) { a.dataset.tip = value; continue; } // the hover note took the title
+    if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+  }
+  for (const { name } of [...a.attributes]) {
+    if (b.hasAttribute(name) || (name === 'data-tip' && b.hasAttribute('title'))) continue;
+    if (name === 'style' && a.matches(STRIPS)) continue; // the edge fades live here (Firefox)
+    a.removeAttribute(name);
+  }
+}
+function patchKids(a, b) {
+  let x = a.firstChild, y = b.firstChild;
+  while (y) {
+    const nextY = y.nextSibling;
+    if (!x) a.append(y);
+    else if (x === pressedRow) x = x.nextSibling;
+    else if (x.nodeType !== y.nodeType || x.nodeName !== y.nodeName || y.classList?.contains('flash') || (x.__chart && x.id !== y.id)) { const nextX = x.nextSibling; a.replaceChild(y, x); x = nextX; }
+    else { if (x.nodeType !== 1) { if (x.nodeValue !== y.nodeValue) x.nodeValue = y.nodeValue; } else if (!x.__chart) { patchAttrs(x, y); patchKids(x, y); } x = x.nextSibling; }
+    y = nextY;
+  }
+  while (x) { const n = x.nextSibling; x.remove(); x = n; }
+}
+export function morph(node, html) {
+  if (!node || node.__chart) return;
+  const t = document.createElement('template');
+  t.innerHTML = html;
+  patchKids(node, t.content);
 }
 
 // --- hover notes ------------------------------------------------------------------------
