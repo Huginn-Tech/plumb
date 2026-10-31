@@ -760,7 +760,7 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
   #moves .t th:nth-child(6) { width: 8.5%; }
   #moves .t th:nth-child(7) { width: 10.5%; }
 }
-@media (max-width: 860px) { #sm-desc { min-height: 3lh; } }
+@media (max-width: 1100px) { #sm-desc { min-height: 3lh; } }
 @media (max-width: 640px) {
   #sm-desc { min-height: 4lh; }
   .mv-verb { min-width: 48px; }
@@ -775,8 +775,8 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 @media (min-width: 861px) {
   .panel-head:has(> .sm-ctl) > div:first-child { flex: 1 1 0; min-width: 0; }
   .sm-ctl { flex: none; flex-wrap: nowrap; gap: 16px; }
-  #sm-desc { min-height: 2lh; }
 }
+@media (min-width: 1101px) { #sm-desc { min-height: 2lh; } }
 /* Leaderboard: one line per row. Twenty rows' height is kept whatever a press brings. */
 #board #list { min-height: 914px; }
 #board .t td { height: 44px; padding-top: 4px; padding-bottom: 4px; color: var(--text-2); }
@@ -825,6 +825,7 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
   #board .addr { height: auto; flex-wrap: wrap; row-gap: 2px; }
   #board .sub.tags.inline { margin: 0; flex-basis: 100%; }
   #pager { min-height: 26px; }
+  #count { display: block; min-height: 1lh; }
 }
 /* Cohorts: the tiles dissolve; each cohort has one frame, round its three stats. */
 .co-grid { gap: 8px; margin: 0 -12px -12px; }
@@ -855,6 +856,8 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 }
 /* "All-time" takes a card's label to a second line; the room is kept on every window. */
 @media (min-width: 861px) and (max-width: 1100px), (max-width: 640px) { .traders-page .kpis.k4 .kpi-label { min-height: 2lh; } }
+@media (min-width: 861px) and (max-width: 1100px), (max-width: 640px) { #tkpis .kpi-row { min-height: 2lh; } }
+@media (max-width: 380px) { #tkpis .kpi:nth-child(n+3) .kpi-label, #tkpis .kpi:nth-child(n+3) .kpi-row { min-height: 3lh; } }
 
 /* Wallet: the tab strip sits on the page, each tab's cards below it. */
 .wallet-tabs .tabs { padding: 0 2px; }
