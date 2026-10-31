@@ -59,7 +59,7 @@ export function mount(el, { params, query, setQuery, navigate }) {
     const name = a.address ? `<span class="addr-full">${esc(a.address)}</span><span class="addr-short">${esc(short(a.address))}</span>` : `Account #${esc(a.id)}`;
     return `<div class="page-head"><div class="wallet-head">
         <div class="wallet-id"><div class="sub"><a href="/traders">Traders</a> / Wallet</div><div class="big">${name}</div>
-          <div class="sub">${d ? keepDots(`Account #${esc(a.id)} · ${esc(since)}${partial}`) : '<span class="skeleton sk-in w-sk-sub"></span>'}</div></div></div>
+          <div class="sub">${d ? keepDots(`Account #${esc(a.id)} · ${esc(since)}${partial}`) : failed ? '' : '<span class="skeleton sk-in w-sk-sub"></span>'}</div></div></div>
         <div class="wallet-actions">
           ${a.address ? `<button class="btn ghost" data-copy="${esc(a.address)}">${ICON.copy} Copy</button>
           <a class="btn ghost" href="${EXPLORER}/address/${esc(a.address)}" target="_blank" rel="noopener noreferrer">${ICON.ext} Explorer</a>` : ''}
@@ -143,8 +143,8 @@ export function mount(el, { params, query, setQuery, navigate }) {
   // these frames in one paint, whether or not open positions come first.
   function frames() {
     if (tab !== 'overview') return `<section class="panel">${FRAME[tab]()}</section>`;
-    const box = (h, phone) => `<section class="panel">${skBox(h, phone)}</section>`;
-    return `${box(411, 478)}<div class="grid g-main">${box(429, 468)}${box(429, 831)}</div><div class="grid g-2">${box(435, 514)}${box(435, 400)}</div>`;
+    const box = (title, h, phone) => `<section class="panel"><div class="panel-head"><h2>${title}</h2></div>${skBox(h, phone)}</section>`;
+    return `${box('By period', PERIODS_H[0], PERIODS_H[1] + 26)}<div class="grid g-main">${box('Net PnL', PERF_H[0], 416)}${box('Performance', PERF_H[0], PERF_H[1] + 26)}</div><div class="grid g-2">${box('Behaviour', INSIGHTS_H[0], INSIGHTS_H[1] + 26)}${box('By market', INSIGHTS_H[0], 348)}</div>`;
   }
   function render() {
     morph($('w-head'), head(data));
@@ -451,6 +451,7 @@ export function mount(el, { params, query, setQuery, navigate }) {
   // A wallet that does not exist has nothing to wait for; any other failure keeps trying.
   function walletFailed() {
     failed = true; shown = null;
+    morph($('w-head'), head(null));
     morph($('kpi-row'), `<div class="kpis k7">${['Account value', 'Unrealized PnL', 'Net PnL · all-time', 'Win rate', 'Profit factor', 'Volume · all-time', 'Max drawdown'].map(label => kpi({ label, value: DASH })).join('')}</div>`);
     const body = $('tab-body');
     if (!body.querySelector('#w-fail')) body.innerHTML = '<section class="panel w-fail" id="w-fail"></section>';

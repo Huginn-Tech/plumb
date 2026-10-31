@@ -35,7 +35,7 @@ const count = (n, one, many) => `${int(n)} ${n === 1 ? one : many}`;
 // The table before its answer, at its real size: 24 metrics under a head that names the
 // wallets. Phones stack it: each wallet a line of the head, each metric its label over
 // its values, on two rows for four or five wallets (ux-tools/stab-sizes.cjs).
-const skTable = n => skRows(24, 38, matchMedia('(max-width: 640px)').matches ? 18 + 33 * n : 59, n > 3 ? 82 : 59);
+const skTable = n => skRows(24, 38, matchMedia('(max-width: 640px)').matches ? 18 + 33 * n : 59, n > 3 ? 82 : n === 3 ? 59.4 : 58);
 // A wallet's card before its answer: the real card, so it takes its real size at every width.
 const skCard = (key, colour) => `<article class="cmp-card" style="--c:${colour}"><header><i class="cmp-dot"></i><span class="mono">${esc(short(key))}</span><button class="icon-btn" type="button" tabindex="-1" style="visibility:hidden" aria-hidden="true">${ICON.x}</button></header><div class="cmp-big"><span class="skeleton sk-in" style="width:130px;height:28px"></span></div><div class="cmp-cap">Net PnL, all-time</div><div class="cmp-spark"></div><dl class="cmp-facts">${['Account value', 'Win rate', 'Open positions'].map(t => `<div><dt>${t}</dt><dd><span class="skeleton sk-in" style="width:60%"></span></dd></div>`).join('')}</dl></article>`;
 // A region that held a skeleton or a message takes the page's first answer whole; after
