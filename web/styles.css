@@ -974,6 +974,7 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 /* Long lists: no line under each row, a soft one every fifth. */
 .t:has(tbody tr:nth-child(10)) td { border-bottom: 0; }
 .t:has(tbody tr:nth-child(10)) tbody tr:nth-child(5n):not(:last-child) td { border-bottom: 1px solid var(--line-group); }
+@media (max-width: 640px) { #view .cmp tbody tr:nth-child(5n):not(:last-child) td { border-bottom: 0; } } /* stacked there: each value is a cell, the row has its own line */
 .t tbody tr:hover { background: rgba(162, 164, 255, 0.07); }
 /* The header strip. */
 .panel-body.flush > .table-wrap .t th { background: var(--th-bg); border-bottom: 0; height: 34px; padding-top: 0; padding-bottom: 0; }
