@@ -72,18 +72,19 @@ export function keepQuery(patch) {
 }
 
 // Back returns the reader to where they were. A page still filling in is held at that
-// place as it grows (scroll anchoring would carry the reader down with every section
-// that lands above), until it has settled. Any move by the reader ends the hold.
+// place as it grows, with scroll anchoring off (it would carry the reader down with every
+// section that lands above), until it has settled. Any move by the reader ends the hold.
 const RESTORE_MS = 6000, SETTLED_MS = 500, MOVES = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
 function restoreScroll(y, nav) {
-  const from = performance.now();
+  const root = document.documentElement, from = performance.now();
   let moved = false, height = 0, steadyFrom = from;
   const stop = () => { moved = true; };
-  const done = () => MOVES.forEach(type => removeEventListener(type, stop, true));
+  const done = () => { root.style.overflowAnchor = ''; MOVES.forEach(type => removeEventListener(type, stop, true)); };
   MOVES.forEach(type => addEventListener(type, stop, { capture: true, passive: true }));
   const step = () => {
     if (moved || nav !== navigation) { done(); return; }
-    const now = performance.now(), doc = document.documentElement.scrollHeight, tall = doc - innerHeight >= y;
+    root.style.overflowAnchor = 'none'; // each frame: a hold this one replaced clears it on its way out
+    const now = performance.now(), doc = root.scrollHeight, tall = doc - innerHeight >= y;
     if (doc !== height || view.querySelector('.skeleton, .sk-rows')) { height = doc; steadyFrom = now; }
     if (tall) window.scrollTo({ top: y });
     if (now - from > RESTORE_MS || (tall && now - steadyFrom > SETTLED_MS)) { window.scrollTo({ top: y }); done(); return; }
