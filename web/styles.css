@@ -935,8 +935,9 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 /* The header holds its shape while it fills in: the MON price lands after the first
    paint, and the pill goes from Connecting… to the block. */
 @media (min-width: 641px) { .live { min-width: 164px; } }
-@media (min-width: 1241px) { .ticker[hidden] { display: flex !important; visibility: hidden; min-width: 146px; } }
-@media (min-width: 1041px) and (max-width: 1240px) { .ticker[hidden] { display: flex !important; visibility: hidden; min-width: 98px; } }
+@media (min-width: 1241px) { .ticker { min-width: 152px; } }
+@media (min-width: 1041px) and (max-width: 1240px) { .ticker { min-width: 106px; } }
+@media (min-width: 1041px) { .ticker[hidden] { display: flex !important; visibility: hidden; } }
 .skip-link { position: absolute; left: 12px; top: -44px; z-index: 30; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--menu); color: var(--text); font-size: 13px; }
 .skip-link:focus { top: 10px; }
 /* Reading text stops at 12px; 11px is for chips and chart ticks only. */
