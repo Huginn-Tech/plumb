@@ -220,7 +220,7 @@ function sparklineNow(el, values, { color = T.accent, area = true } = {}) {
   chart.setOption({
     animation: false, grid: { left: 0, right: 0, top: 2, bottom: 0 },
     xAxis: { type: 'category', show: false, data: values.map((_, i) => i) }, yAxis: { type: 'value', show: false, scale: true },
-    series: [{ type: 'line', data: values, symbol: 'none', smooth: 0.35, lineStyle: { color, width: 1.5 }, areaStyle: area ? { color: new window.echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: color + '59' }, { offset: 1, color: color + '00' }]) } : undefined }]
+    series: [{ type: 'line', data: values, symbol: 'none', smooth: false, lineStyle: { color, width: 1.5 }, areaStyle: area ? { color: color + '1f' } : undefined }]
   }, true);
 }
 
@@ -297,7 +297,7 @@ function lineChartNow(el, { times, series, bucketSeconds, fmt = v => usd(v), yFm
   chart.setOption({
     ...base(), grid: { ...base().grid, right: fitRight(chart, el, times, bucketSeconds, { line: true }) }, xAxis: { ...timeAxis(times, bucketSeconds, el), boundaryGap: false }, yAxis: { ...valueAxis(yFmt), scale },
     tooltip: { ...base().tooltip, formatter: tooltip(fmt, bucketSeconds) },
-    series: series.map(s => ({ name: s.name, type: 'line', data: s.data, symbol: 'none', smooth: 0.3, connectNulls: true, lineStyle: { color: s.color, width: 1.75 }, itemStyle: { color: s.color }, areaStyle: area && series.length === 1 ? { color: new window.echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: s.color + '47' }, { offset: 1, color: s.color + '00' }]) } : undefined }))
+    series: series.map(s => ({ name: s.name, type: 'line', data: s.data, symbol: 'none', smooth: false, connectNulls: true, lineStyle: { color: s.color, width: 1.75 }, itemStyle: { color: s.color }, areaStyle: area && series.length === 1 ? { color: new window.echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: s.color + '47' }, { offset: 1, color: s.color + '00' }]) } : undefined }))
   }, true);
 }
 
