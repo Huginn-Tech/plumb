@@ -147,8 +147,10 @@ export function mount(el, { query, setQuery, keepQuery }) {
     if (!data) { morph($('meta'), dotted(`${head} · ${period}`)); return; }
     const m = data.meta, who = FLOW_SORTS.has(by) ? 'accounts' : 'traders', partial = m.coverage && !m.coverage.complete ? ' · history still indexing' : '';
     const size = `${int(data.total)} ${who}${num(m.volume) ? ` · ${usd(m.volume)} volume` : ''}`;
-    const text = ep === 'this_epoch' ? `${head} · ${period}, ${epochSpan(m.from)} · ends in ${epochLeft(m.from)} · ${size}` : ep === 'last_epoch' ? `${head} · ${period}, ${epochSpan(m.from)} · final · ${size}` : `${head} · ${period} · ${size}`;
-    morph($('meta'), dotted(text + partial));
+    // An epoch's line keeps to two lines on narrow screens, so the board does not move under the chip just pressed.
+    const span = ep && `<span class="m-wide">${period}, ${esc(epochSpan(m.from))}</span><span class="m-tight">${esc(epochSpan(m.from).replaceAll(' 16:00', '').replace(' UTC', ''))}</span>`;
+    const text = ep === 'this_epoch' ? `${esc(head)} · ${span} · ends in ${esc(epochLeft(m.from))} · ${esc(size)}` : ep === 'last_epoch' ? `${esc(head)} · ${span} · final · ${esc(size)}` : esc(`${head} · ${period} · ${size}`);
+    morph($('meta'), keepDots(text + partial));
     $('meta').title = m.blocks?.first ? `Perpl activity from block ${int(m.blocks.first)} to block ${int(m.blocks.last)}` : '';
   }
   renderMeta();
