@@ -3,25 +3,40 @@
 // flows, and market share.
 import { get, stream } from '../api.js';
 import { usd, compact, int, price, pct, share, num, esc, signClass, timeOnly, ago, duration } from '../format.js';
-import { kpi, keepDots, seg, table, mkt, sideTag, addr, pnl, tradeAction, chartTools, skeleton, skChart, empty, assignColors, colorOf, hasColor, logo, ICON, OTHER_HEX, SLOT_HEX, mergeByAsset } from '../ui.js';
-import { sparkline, stackedBars, lineChart, signedBars, twoSided, toggleSeries, COLORS, CUMULATIVE } from '../charts.js';
+import { kpi, keepDots, infoTip, seg, table, mkt, sideTag, addr, pnl, tradeAction, chartTools, skRows, skKpis, skChart, empty, assignColors, colorOf, hasColor, logo, ICON, OTHER_HEX, SLOT_HEX, mergeByAsset, hold, morph, panelError, keepTrying, fitRows } from '../ui.js';
+import { sparkline, stackedBars, lineChart, signedBars, twoSided, toggleSeries, dropZoom, COLORS, CUMULATIVE } from '../charts.js';
 
 const WINDOWS = [['24h', '24H'], ['7d', '7D'], ['30d', '30D'], ['all', 'All']];
 const MIN_SIZES = [['0', 'All'], ['100', '≥$100'], ['1000', '≥$1K'], ['10000', '≥$10K']];
 const FEE_VIEWS = [['type', 'By recipient'], ['market', 'By market']];
 const FLOW_VIEWS = [['recent', 'Latest'], ['in', 'Top in'], ['out', 'Top out']];
-// Windows other than 24h have no push of their own: refetch at most this often while blocks arrive.
-const LONG_WINDOW_REFRESH_MS = 15000;
+// Windows other than 24h and the flow lists have no push of their own: refetch at most this often while blocks arrive.
+const QUIET_REFRESH_MS = 15000;
 // The window the headline cards and the lists open on: the last day, updated live.
 const DEFAULT_WINDOW = '24h';
 const segSm = (name, options, active) => seg(name, options, active).replace('class="seg"', 'class="seg sm"');
+// Rows in the two lists of the Activity row.
+const LIST_ROWS = 8;
+const windowOf = q => (WINDOWS.some(([v]) => v === q.get('window')) ? q.get('window') : DEFAULT_WINDOW);
+const savedMinSize = () => { try { const v = localStorage.getItem('ps.minsize'); return MIN_SIZES.some(([x]) => x === v) ? v : '100'; } catch { return '100'; } };
+// What the API says goes unprinted (panelError has its own words); a bug in this file does not.
+const logBug = e => { if (e?.status === undefined && e?.code === undefined) console.error(e); };
 
 export function mount(el, { query, setQuery }) {
-  let w = WINDOWS.some(([v]) => v === query.get('window')) ? query.get('window') : DEFAULT_WINDOW;
+  let w = windowOf(query);
   let feeView = 'type';
-  let minSize = localStorage.getItem('ps.minsize') ?? '100';
-  let data = null, series = null, alive = true, flows = null, flowView = 'recent', lastLongLoad = 0, trendsLoaded = false;
-  const tape = [], off = [];
+  let minSize = savedMinSize();
+  // dataWin and flowsWin: the window the cards and the flow lists show, which trails w while its answer is on the way.
+  let data = null, series = null, dataWin = null, alive = true, flows = null, flowsWin = null, flowView = 'recent', lastQuiet = Date.now();
+  let tapeLoaded = false, liqsLoaded = false, lsLoaded = false;
+  const tape = [], off = [], hidden = new Set(), sparks = {}, trendAsk = {};
+  // One hold per region, taken on a press and let go by the answer that lands.
+  const held = {};
+  const dim = id => { held[id] ??= hold($(id)); };
+  const undim = id => { held[id]?.(); held[id] = null; };
+  // One retry loop per region: a newer load replaces the one before it.
+  const stops = {};
+  const run = (key, load, fail) => { stops[key]?.(); stops[key] = keepTrying(load, { alive: () => alive, fail }); };
   // The volume chart and the trend charts each keep their own window, independent
   // of the one at the top (which drives the headline cards and the activity lists).
   const TRENDS = ['oi', 'tvl', 'flows', 'traders', 'fees', 'liq', 'tpnl', 'taker'];
@@ -30,7 +45,7 @@ export function mount(el, { query, setQuery }) {
   const winCtl = id => segSm(`tw:${id}`, WINDOWS, pw[id]);
   // The volume chart opens on the last 24 hours, hour by hour.
   let vw = '24h';
-  const panel = (id, title, desc, extra = '') => `<section class="panel trend"><div class="panel-head"><div class="trend-id"><h2>${title} <span class="info-tip" title="${esc(desc)}">i</span></h2><div class="head-value" id="${id}-v"></div>${extra}</div><div class="trend-side"><div class="trend-ctl">${chartTools(id, id)}<span id="${id}-win" class="trend-win">${winCtl(id)}</span></div><div class="legend dots" id="${id}-lg"></div></div></div><div class="panel-body"><div class="chart sm" id="${id}">${skChart()}</div></div></section>`;
+  const panel = (id, title, desc, extra = '') => `<section class="panel trend"><div class="panel-head"><div class="trend-id"><h2>${title}${infoTip(desc, title)}</h2><div class="head-value" id="${id}-v"></div>${extra}</div><div class="trend-side"><div class="trend-ctl">${chartTools(id, id)}<span id="${id}-win" class="trend-win">${winCtl(id)}</span></div><div class="legend dots" id="${id}-lg"></div></div></div><div class="panel-body"><div class="chart sm" id="${id}">${skChart()}</div></div></section>`;
 
   el.innerHTML = `
     <div class="page-head hero">
@@ -41,7 +56,7 @@ export function mount(el, { query, setQuery }) {
       <div class="hero-actions"><a class="btn primary" href="https://app.perpl.xyz" target="_blank" rel="noopener noreferrer">Trade on Perpl ${ICON.ext}</a><div id="win">${seg('window', WINDOWS, w)}</div></div>
     </div>
     <div class="stack">
-      <div class="kpis" id="kpis">${Array.from({ length: 6 }, () => '<div class="kpi"><div class="skeleton sk-line" style="width:40%"></div><div class="skeleton" style="height:26px;width:70%;margin-top:10px"></div><div class="skeleton" style="height:28px;margin-top:10px"></div></div>').join('')}</div>
+      <div class="kpis keep-delta" id="kpis">${skKpis(6, { spark: true, lines: 2 })}</div>
       <div class="grid g-main">
         <section class="panel">
           <div class="panel-head"><div><h2>Trading volume</h2><div class="desc">Maker-fill notional by market; line: running total</div></div><div class="head-right vol-head">${chartTools('main-chart', 'volume')}<a class="meta" href="/markets">Market details →</a><span id="vwin" class="trend-win">${segSm('vw', WINDOWS, vw)}</span></div></div>
@@ -50,8 +65,8 @@ export function mount(el, { query, setQuery }) {
         </section>
         <section class="panel fill">
           <div class="panel-head"><h2>Live trades</h2><div id="minsize">${segSm('min', MIN_SIZES, minSize)}</div></div>
-          <div class="panel-body flush scroll" id="tape">${skeleton(8)}</div>
-          <div class="panel-foot"><span id="tape-meta">Finalized blocks · aggressor side · UTC</span><span id="tape-count"></span></div>
+          <div class="panel-body flush scroll" id="tape">${skRows(11, 38, 34)}</div>
+          <div class="panel-foot ov-tape-foot"><span id="tape-meta">Finalized blocks · aggressor side · UTC</span><span id="tape-count"></span></div>
         </section>
       </div>
       <div class="section-label">Trends</div>
@@ -67,67 +82,111 @@ export function mount(el, { query, setQuery }) {
       </div>
       <div class="section-label">Activity</div>
       <div class="grid g-3 aligned">
-        <section class="panel"><div class="panel-head"><h2>Latest liquidations</h2><a class="meta" href="/liquidations">View all →</a></div><div class="panel-body flush" id="liqs">${skeleton(5)}</div></section>
-        <section class="panel"><div class="panel-head"><h2>Deposits and withdrawals</h2><div id="flowview">${segSm('flowv', FLOW_VIEWS, flowView)}</div></div><div class="panel-body flush" id="flowlist">${skeleton(5)}</div></section>
-        <section class="panel fill"><div class="panel-head"><h2>Across windows</h2><span class="meta">Exchange totals</span></div><div class="panel-body flush fill-table" id="windows">${skeleton(5)}</div></section>
+        <section class="panel"><div class="panel-head"><h2>Latest liquidations</h2><a class="meta" href="/liquidations">View all →</a></div><div class="panel-body flush" id="liqs">${skRows(LIST_ROWS, 38, 34)}</div></section>
+        <section class="panel"><div class="panel-head"><h2>Deposits and withdrawals</h2><div id="flowview">${segSm('flowv', FLOW_VIEWS, flowView)}</div></div><div class="panel-body flush" id="flowlist">${skRows(LIST_ROWS, 38, 34)}</div></section>
+        <section class="panel fill"><div class="panel-head"><h2>Across windows</h2><span class="meta">Exchange totals</span></div><div class="panel-body flush fill-table" id="windows">${skRows(4, 76, 34, 38)}</div></section>
       </div>
       <div class="section-label">Market share</div>
       <div class="grid g-2" id="landscape-grid">
-        <section class="panel fill"><div class="panel-head"><div><h2>Perps on Monad</h2><div class="desc">Open interest by venue</div></div><span class="meta" id="ls-chain-meta"></span></div><div class="panel-body flush fill-table ls-table" id="ls-chain">${skeleton(4)}</div></section>
-        <section class="panel"><div class="panel-head"><div><h2>Among all perps</h2><div class="desc">Open interest by venue</div></div><span class="meta" id="ls-meta"></span></div><div class="panel-body flush ls-table" id="ls-all">${skeleton(6)}</div></section>
+        <section class="panel fill"><div class="panel-head"><div><h2>Perps on Monad</h2><div class="desc">Open interest by venue</div></div><span class="meta" id="ls-chain-meta"></span></div><div class="panel-body flush fill-table ls-table" id="ls-chain">${skRows(3, 76, 34, 38)}</div></section>
+        <section class="panel"><div class="panel-head"><div><h2>Among all perps</h2><div class="desc">Open interest by venue</div></div><span class="meta" id="ls-meta"></span></div><div class="panel-body flush ls-table" id="ls-all">${skRows(6, 38, 34)}</div></section>
       </div>
     </div>`;
   const $ = id => el.querySelector(`#${id}`);
-  // Every figure says which period it covers: the window, or "now" for state.
-  const windowLabel = () => (w === 'all' ? 'All-time' : w);
+  const winLabel = win => (win === 'all' ? 'All-time' : win);
   const BUCKET_NAMES = { 3600: 'hourly', 14400: '4-hour', 86400: 'daily', 604800: 'weekly' };
   // Period length: the API's default per window (all-time: weekly), or daily/weekly on request.
   const BUCKET_CHOICES = { '30d': [['1d', 'Daily'], ['1w', 'Weekly']], all: [['1d', 'Daily'], ['1w', 'Weekly']] };
   // The headline cards' series (sparklines) follow the top switch; the volume
   // chart's series follows its own window and period length.
   let bucket = null, vseries = null;
-  const seriesPath = () => `protocol/series?window=${w}`;
   const volPath = () => `protocol/series?window=${vw}${bucket ? `&bucket=${bucket}` : ''}`;
-  function renderBucket() { const c = BUCKET_CHOICES[vw]; $('bucket').innerHTML = c ? segSm('bucket', c, bucket ?? (vw === 'all' ? '1w' : '1d')) : ''; }
-  const loadVolume = (fresh = false) => get(volPath(), fresh ? { maxAge: 0 } : undefined).then(v => { if (!alive) return; vseries = v; renderVolume(); });
+  function renderBucket() { const c = BUCKET_CHOICES[vw]; morph($('bucket'), c ? segSm('bucket', c, bucket ?? (vw === 'all' ? '1w' : '1d')) : ''); }
+  // The answer that lands last is the newest press, whatever order they arrive in.
+  let volAsk = 0, volShown = null;
+  async function loadVolume(fresh = false) {
+    const ask = ++volAsk, path = volPath();
+    const v = await get(path, fresh ? { maxAge: 0 } : undefined);
+    if (!alive || ask !== volAsk) return;
+    vseries = v; volShown = path; undim('main-chart'); renderVolume();
+  }
+  const startVolume = (fresh = false) => run('volume', () => loadVolume(fresh), e => {
+    logBug(e); undim('main-chart');
+    if (volShown !== volPath()) { $('chart-meta').textContent = ''; panelError($('main-chart'), undefined, () => startVolume()); }
+  });
+  const pressVolume = () => { dropZoom($('main-chart')); dim('main-chart'); startVolume(); };
 
   // On all time the active traders card shows the last 30 days: not every
   // account that ever traded is an active one.
   let active30 = null;
-  const active30Data = () => Promise.all([get('protocol?window=30d', { maxAge: 15000 }), get('protocol/series?window=30d', { maxAge: 15000 })]).then(([p, s]) => ({ p, s }));
-  async function load() {
-    const [p, s, a, v] = await Promise.all([get(`protocol?window=${w}`), get(seriesPath()), w === 'all' ? active30Data().catch(() => null) : null, vseries ? null : get(volPath())]);
-    if (!alive) return;
-    data = p; series = s; active30 = a; if (v) vseries = v;
+  const active30Data = fresh => Promise.all([get('protocol?window=30d', { maxAge: fresh ? 0 : 15000 }), get('protocol/series?window=30d', { maxAge: fresh ? 0 : 15000 })]).then(([p, s]) => ({ p, s }));
+  let mainAsk = 0;
+  async function loadMain(fresh = false) {
+    const ask = ++mainAsk, win = w, opt = fresh ? { maxAge: 0 } : undefined;
+    const [p, s, a] = await Promise.all([get(`protocol?window=${win}`, opt), get(`protocol/series?window=${win}`, opt), win === 'all' ? active30Data(fresh).catch(() => null) : null]);
+    if (!alive || ask !== mainAsk) return;
+    data = p; series = s; active30 = a; dataWin = win;
     assignColors([...p.markets].sort((a, b) => num(b.volume) - num(a.volume)).map(m => ({ id: m.id, symbol: m.symbol })));
-    renderBucket(); renderKpis(); if (v) renderVolume(); renderWindows();
-    if (!trendsLoaded) { trendsLoaded = true; loadTrends().catch(() => {}); }
+    renderKpis(); renderWindows();
+    undim('kpis'); undim('windows');
   }
-  async function loadFeeds() {
-    const [t, l, f] = await Promise.all([get('trades?limit=200', { maxAge: 800 }), get('liquidations?limit=8'), get(`flows?window=${w}`)]);
-    if (!alive) return;
-    tape.length = 0; tape.push(...t.rows);
-    renderTape(); renderLiqs(l); renderFlows(f);
+  // A refresh that fails leaves the figures of this window where they are.
+  const startMain = (fresh = false) => run('main', () => loadMain(fresh), e => {
+    logBug(e); undim('kpis'); undim('windows');
+    if (dataWin !== w) { panelError($('kpis'), undefined, () => startMain()); panelError($('windows'), undefined, () => startMain()); }
+  });
+  // Rows from the stream that are newer than the answer stay above it.
+  let tapeAsk = 0;
+  async function loadTape(fresh = false) {
+    const ask = ++tapeAsk;
+    const t = await get('trades?limit=200', { maxAge: fresh ? 0 : 800 });
+    if (!alive || ask !== tapeAsk) return;
+    const newest = t.rows.reduce((a, r) => Math.max(a, Number(r.block)), 0);
+    const kept = tape.filter(r => (r.proposed ? !t.rows.some(x => x.tx === r.tx) : Number(r.block) > newest));
+    tape.length = 0; tape.push(...kept, ...t.rows);
+    tapeLoaded = true; renderTape();
   }
+  const startTape = (fresh = false) => run('tape', () => loadTape(fresh), e => { logBug(e); if (!$('tape').querySelector('table')) panelError($('tape'), undefined, () => startTape()); });
+  let liqAsk = 0;
+  async function loadLiqs(fresh = false) {
+    const ask = ++liqAsk;
+    const l = await get(`liquidations?limit=${LIST_ROWS}`, fresh ? { maxAge: 0 } : undefined);
+    if (!alive || ask !== liqAsk) return;
+    liqsLoaded = true; renderLiqs(l);
+  }
+  const startLiqs = (fresh = false) => run('liqs', () => loadLiqs(fresh), e => { logBug(e); if (!liqsLoaded) panelError($('liqs'), undefined, () => startLiqs()); });
+  let flowAsk = 0;
+  async function loadFlows(fresh = false) {
+    const ask = ++flowAsk, win = w;
+    const f = await get(`flows?window=${win}`, fresh ? { maxAge: 0 } : undefined);
+    if (!alive || ask !== flowAsk) return;
+    flows = f; flowsWin = win; undim('flowlist'); renderFlows();
+  }
+  const startFlows = (fresh = false) => run('flows', () => loadFlows(fresh), e => { logBug(e); undim('flowlist'); if (flowsWin !== w) renderFlows(); });
 
   // Change over the window from the running-sum series (null until history is complete).
-  function seriesChange(field, sr = series, win = w) {
+  function seriesChange(field, sr = series, win = dataWin) {
     if (win === 'all' || !sr?.meta?.cumulative_complete) return undefined; // from launch the change is meaningless
     const vals = sr.points.map(p => num(p[field])).filter(v => v !== null);
     if (vals.length < 2 || !vals[0]) return undefined;
     return Math.round((vals.at(-1) - vals[0]) / vals[0] * 10000) / 100;
   }
-  function spark(key, values, color = COLORS.accent) { const node = $(key); if (node && values.some(v => v !== null && v !== undefined)) sparkline(node, values, { color }); }
+  // A card's line is drawn again only when its numbers moved.
+  function spark(key, values, color = COLORS.accent) {
+    const node = $(key), mark = values.join();
+    if (!node || !values.some(v => v !== null && v !== undefined) || (node.__chart && sparks[key] === mark)) return;
+    sparks[key] = mark; sparkline(node, values, { color });
+  }
   function renderKpis() {
-    const h = data.headline, c = data.current, pts = series.points;
-    const cov = data.meta.coverage, wl = windowLabel(), act = w === 'all' ? active30 : null;
+    const h = data.headline, c = data.current, pts = series.points, win = dataWin;
+    const cov = data.meta.coverage, wl = winLabel(win), act = win === 'all' ? active30 : null;
     // A change against a previous window that is still being indexed would mislead: hide it.
     // All-time has no previous period, so no change is shown (not a "—").
-    const ch = v => (w === 'all' || data.meta.previous_complete === false ? undefined : v);
+    const ch = v => (win === 'all' || data.meta.previous_complete === false ? undefined : v);
     const partial = cov && !cov.complete ? ' <span class="tag warn" title="History for this window is still being indexed">partial</span>' : '';
     // Window totals compare with the window before; open interest and TVL show their change within the window.
     const vsPrev = { basis: 'vs prev', basisTitle: `Compared with the previous ${wl}` }, within = { basis: `in ${wl}`, basisTitle: `Change over the last ${wl}` };
-    $('kpis').innerHTML = [
+    morph($('kpis'), [
       kpi({ label: `Volume · ${wl}`, value: usd(h.volume.value), delta: ch(h.volume.change_pct), ...vsPrev, note: `${int(data.markets.reduce((a, m) => a + (m.fills ?? 0), 0))} trades${partial}`, spark: 'sp-vol' }),
       kpi({ label: 'Open interest', value: usd(c?.open_interest), delta: seriesChange('open_interest'), ...within, note: c ? `${int(c.positions)} open positions` : '', spark: 'sp-oi' }),
       kpi({ label: 'TVL', value: usd(c?.tvl), delta: seriesChange('tvl'), ...within, note: `${usd(h.net_flow.value, { sign: true })} net flow · ${wl}`, spark: 'sp-tvl' }),
@@ -135,7 +194,7 @@ export function mount(el, { query, setQuery }) {
       act ? kpi({ label: 'Active traders · 30d', value: int(act.p.headline.traders.value), note: `${int(act.p.headline.new_accounts.value)} new accounts`, spark: 'sp-tr' })
         : kpi({ label: `Active traders · ${wl}`, value: int(h.traders.value), delta: ch(h.traders.change_pct), ...vsPrev, note: `${int(h.new_accounts.value)} new accounts`, spark: 'sp-tr' }),
       kpi({ label: `Liquidations · ${wl}`, value: usd(h.liquidated.value), delta: ch(h.liquidated.change_pct), ...vsPrev, invert: true, note: `${int(h.liquidations.value)} liquidations`, spark: 'sp-liq' })
-    ].join('');
+    ].join(''));
     spark('sp-vol', pts.map(p => num(p.volume)));
     spark('sp-oi', pts.map(p => num(p.open_interest)));
     spark('sp-tvl', pts.map(p => num(p.tvl)));
@@ -154,8 +213,8 @@ export function mount(el, { query, setQuery }) {
   }
   // The swatch keeps the series colour; the logo (when the asset has one) names it.
   const legendLogo = s => { if (s.id === undefined) return ''; const html = logo(s.id, s.name, 14); return html.startsWith('<img') ? html : ''; };
-  // Redrawn in place on the minute refresh, so a zoom holds; a new window or
-  // period length starts from a skeleton (update, onSeg).
+  // Redrawn in place on the minute refresh, so a zoom holds and a market switched
+  // off stays off; a new window or period length drops the zoom (pressVolume).
   function renderVolume() {
     if (!vseries) return;
     const node = $('main-chart'), b = vseries.meta.bucket_seconds;
@@ -163,8 +222,10 @@ export function mount(el, { query, setQuery }) {
     $('chart-meta').textContent = BUCKET_CHOICES[vw] ? 'UTC' : `${BUCKET_NAMES[b] ?? `${vseries.meta.bucket}`} bars · UTC`;
     const list = byMarket('volume', vseries);
     stackedBars(node, { times: vseries.times, series: list, bucketSeconds: b, cumulative: true, zoom: true });
-    $('legend').innerHTML = list.map(s => `<button class="lg" data-action="toggle" data-name="${esc(s.name)}"><i style="background:${s.color}"></i>${legendLogo(s)}${esc(s.name)}</button>`).join('')
-      + `<button class="lg" data-action="toggle" data-name="${CUMULATIVE}"><i style="background:#fff;height:2px;border-radius:1px"></i>Cumulative</button>`;
+    for (const name of hidden) if (name === CUMULATIVE || list.some(s => s.name === name)) toggleSeries(node, name);
+    const isOff = name => (hidden.has(name) ? ' off' : '');
+    morph($('legend'), list.map(s => `<button class="lg${isOff(s.name)}" data-action="toggle" data-name="${esc(s.name)}"><i style="background:${s.color}"></i>${legendLogo(s)}${esc(s.name)}</button>`).join('')
+      + `<button class="lg${isOff(CUMULATIVE)}" data-action="toggle" data-name="${CUMULATIVE}"><i style="background:#fff;height:2px;border-radius:1px"></i>Cumulative</button>`);
   }
   // Open interest and TVL are running sums from launch, so they wait for the backfill.
   let backfill = null;
@@ -173,11 +234,11 @@ export function mount(el, { query, setQuery }) {
     return `A running sum over every event since launch, drawn once history indexing completes.${p}`;
   }
   // A dot and a name per series, above the chart on the right.
-  const legendOf = (id, list) => { const n = $(`${id}-lg`); if (n) n.innerHTML = list.map(s => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join(''); };
+  const legendOf = (id, list) => morph($(`${id}-lg`), list.map(s => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join(''));
   const NET = { color: '#ffffff' };
   // A note wraps only between its parts ("$267.8K insurance" stays whole), each "·" with the part before it.
   const noteParts = note => keepDots(note.split(' · ').map(x => `<span class="nw">${x}</span>`).join(' · '));
-  function headValue(id, value, note = '') { const n = $(`${id}-v`); if (n) n.innerHTML = `<div class="hv">${value}</div>${note ? `<div class="hn">${noteParts(note)}</div>` : ''}`; }
+  function headValue(id, value, note = '') { morph($(`${id}-v`), `<div class="hv">${value}</div>${note ? `<div class="hn">${noteParts(note)}</div>` : ''}`); }
   // Fees per period by recipient (the protocol's and the insurance fund's
   // shares, which add up to the fees) or by market.
   function renderFees() {
@@ -189,20 +250,24 @@ export function mount(el, { query, setQuery }) {
   }
   // Each trend panel: its window's totals (header) and series (chart).
   const trendOf = {};
-  const winLabel = win => (win === 'all' ? 'All-time' : win);
   const trendData = (win, fresh) => Promise.all([get(`protocol?window=${win}`, { maxAge: fresh ? 0 : 15000 }), get(`protocol/series?window=${win}`, { maxAge: fresh ? 0 : 15000 })]).then(([p, s]) => ({ p, s }));
   async function loadTrend(id, fresh = false) {
-    const win = pw[id];
+    const win = pw[id], ask = trendAsk[id] = (trendAsk[id] ?? 0) + 1;
     const d = await trendData(win, fresh);
-    if (!alive || pw[id] !== win) return; // switched again meanwhile
-    trendOf[id] = d; renderTrend(id);
+    if (!alive || ask !== trendAsk[id]) return; // switched again meanwhile
+    trendOf[id] = { ...d, win }; undim(id); undim(`${id}-v`); renderTrend(id);
   }
-  const loadTrends = (fresh = false) => Promise.all(TRENDS.map(id => loadTrend(id, fresh).catch(() => {})));
+  const startTrend = (id, fresh = false) => run(`trend:${id}`, () => loadTrend(id, fresh), e => {
+    logBug(e); undim(id); undim(`${id}-v`);
+    if (trendOf[id]?.win !== pw[id]) { morph($(`${id}-v`), ''); panelError($(id), undefined, () => startTrend(id)); }
+  });
+  const startTrends = (fresh = false) => TRENDS.forEach(id => startTrend(id, fresh));
+  // The after-fees figure waits on its own call: the line keeps the last one meanwhile.
+  let afterFees = null;
   function renderTrend(id) {
     const d = trendOf[id], node = $(id); if (!d || !node) return;
     const win = pw[id], sr = d.s, pts = sr.points, times = sr.times, b = sr.meta.bucket_seconds, h = d.p.headline, c = d.p.current;
-    // Charts are redrawn in place on the minute refresh (their marks move, not regrow);
-    // a window switch starts from a skeleton (onSeg).
+    // Charts are redrawn in place, on the minute refresh and on a window switch (their marks move, not regrow).
     // Open interest and TVL: axes start at zero, so a 1% move looks like one; the change
     // over the window is in the header, at the KPI's precision (one decimal, none from 100%).
     const moved = field => { const x = seriesChange(field, sr, win); if (x === undefined) return win === 'all' ? 'now' : ''; return `<span class="${signClass(x, 1) || 'faint'}">${pct(x, { digits: 1, sign: true })}</span> over ${win}`; };
@@ -252,9 +317,9 @@ export function mount(el, { query, setQuery }) {
         // Header figures come from the window's own totals, not from summing the
         // chart's buckets; 'after fees' is the Traders page's figure for the same window.
         const total = num(h.realized_pnl?.value ?? h.realized_pnl) ?? 0;
-        const value = pnl(total);
-        headValue('tpnl', value, winLabel(win));
-        get(`traders/summary?window=${win}`, { maxAge: 20000 }).then(t => { if (alive && t && pw.tpnl === win) headValue('tpnl', value, `${winLabel(win)} · after fees ${usd(t.net_pnl, { sign: true })}`); }).catch(() => {});
+        const value = pnl(total), line = () => `${winLabel(win)}${afterFees?.win === win ? ` · after fees ${afterFees.text}` : ''}`;
+        headValue('tpnl', value, line());
+        get(`traders/summary?window=${win}`, { maxAge: 20000 }).then(t => { if (!alive || !t || trendOf.tpnl?.win !== win) return; afterFees = { win, text: usd(t.net_pnl, { sign: true }) }; headValue('tpnl', value, line()); }).catch(() => {});
         signedBars(node, { times, values: pts.map(p => num(p.realized_pnl)), bucketSeconds: b, name: 'Trader realized PnL' });
         break;
       }
@@ -278,88 +343,102 @@ export function mount(el, { query, setQuery }) {
   function renderSpeed() {
     if (!finalMs.length) return;
     const sorted = [...finalMs].sort((a, b) => a - b), mid = sorted[Math.floor(sorted.length / 2)];
-    $('tape-meta').innerHTML = `<span class="speed-pill">${ICON.cube} Proposed → final <b class="num" title="Median time for a block to go from proposed to final, over the last ${sorted.length} blocks with Perpl activity">${secs(mid)}</b></span><span>UTC</span>`;
+    morph($('tape-meta'), `<span class="speed-pill">${ICON.cube} Proposed → final <b class="num" title="Median time for a block to go from proposed to final, over the last ${sorted.length} blocks with Perpl activity">${secs(mid)}</b></span><span>UTC</span>`);
   }
   function renderTape() {
     const min = Number(minSize);
     const rows = tape.filter(r => (num(r.notional) ?? 0) >= min);
     $('tape-count').textContent = rows.length ? `${int(Math.min(rows.length, 60))} shown` : '';
-    if (!rows.length) { $('tape').innerHTML = empty(tape.length ? 'No trades of this size yet' : 'Waiting for trades'); return; }
-    $('tape').innerHTML = table({ id: 'tape', compact: true, columns: [
+    // Until the first answer the skeleton or the error stays: no rows yet says nothing about the market.
+    if (!rows.length) { if (tapeLoaded) morph($('tape'), empty(tape.length ? 'No trades of this size yet' : 'Waiting for trades')); return; }
+    morph($('tape'), table({ id: 'tape', compact: true, columns: [
       { key: 't', label: 'Time', render: r => `<span class="muted num">${timeOnly(r.ts)}</span>` },
       { key: 'm', label: 'Market', render: r => mkt(r.market, r.symbol) },
       { key: 's', label: 'Action', render: tradeAction },
       { key: 'p', label: 'Price', phone: false, n: true, render: r => price(r.price) },
       { key: 'v', label: 'Value', n: true, render: r => usd(r.notional) }
-    ], rows: rows.slice(0, 60), rowAttrs: r => `class="link ${r.fresh ? 'flash' : ''} ${r.proposed ? 'proposed' : ''}" data-href="/wallet/${esc(r.address || r.account)}" ${r.proposed ? `title="${stageTitle(r)}"` : ''}` });
+    ], rows: rows.slice(0, 60), rowAttrs: r => `class="link ${r.fresh ? 'flash' : ''} ${r.proposed ? 'proposed' : ''}" data-href="/wallet/${esc(r.address || r.account)}" ${r.proposed ? `title="${stageTitle(r)}"` : ''}` }));
     for (const r of tape) r.fresh = false;
   }
   function renderLiqs(l) {
-    $('liqs').innerHTML = l.rows.length ? table({ id: 'liqs', compact: true, columns: [
+    morph($('liqs'), l.rows.length ? table({ id: 'liqs', compact: true, columns: [
       { key: 'm', label: 'Market', render: r => mkt(r.market, r.symbol) },
       { key: 's', label: 'Position', render: r => sideTag(r.side) },
       { key: 'v', label: 'Value', n: true, render: r => usd(r.notional) },
       { key: 't', label: 'When', n: true, render: r => `<span class="muted">${ago(r.ts)}</span>` }
-    ], rows: l.rows.slice(0, 7), rowAttrs: r => `class="link" data-href="/wallet/${esc(r.address || r.account)}"` }) : empty('No liquidations yet');
+    ], rows: l.rows.slice(0, LIST_ROWS), rowAttrs: r => `class="link" data-href="/wallet/${esc(r.address || r.account)}"` }) : empty('No liquidations yet'));
   }
   // Latest movements, or the window's largest depositors / withdrawers with their net.
-  function renderFlows(f = flows) {
-    if (!f) return;
-    flows = f;
+  function renderFlows() {
+    const f = flows, node = $('flowlist');
+    // The top lists belong to one window: another window's are no answer. Latest is the same on all of them.
+    if (flowsWin !== w && (!f || flowView !== 'recent')) { if (!held.flowlist) panelError(node, undefined, () => startFlows()); return; }
     const link = r => `class="link" data-href="/wallet/${esc(r.address || r.account)}"`;
     if (flowView === 'recent') {
-      const rows = (f.recent ?? []).slice(0, 7);
-      $('flowlist').innerHTML = rows.length ? table({ id: 'flowlist', compact: true, columns: [
+      const rows = (f.recent ?? []).slice(0, LIST_ROWS);
+      morph(node, rows.length ? table({ id: 'flowlist', compact: true, columns: [
         { key: 'k', label: 'Type', render: r => `<span class="${r.kind === 'deposit' ? 'pos' : 'neg'}">${r.kind === 'deposit' ? 'Deposit' : 'Withdrawal'}</span>` },
         { key: 'a', label: 'Wallet', render: r => addr(r.address, r.account, { star: false }) },
         { key: 'v', label: 'Amount', n: true, render: r => usd(r.amount) },
         { key: 't', label: 'When', phone: false, n: true, render: r => `<span class="muted">${ago(r.ts)}</span>` }
-      ], rows, rowAttrs: link }) : empty('No recent deposits or withdrawals');
+      ], rows, rowAttrs: link }) : empty('No recent deposits or withdrawals'));
       return;
     }
-    const inbound = flowView === 'in', rows = ((inbound ? f.top_depositors : f.top_withdrawers) ?? []).slice(0, 7);
-    $('flowlist').innerHTML = rows.length ? table({ id: 'flowlist', compact: true, columns: [
+    const inbound = flowView === 'in', rows = ((inbound ? f.top_depositors : f.top_withdrawers) ?? []).slice(0, LIST_ROWS);
+    morph(node, rows.length ? table({ id: 'flowlist', compact: true, columns: [
       { key: 'a', label: 'Wallet', render: r => addr(r.address, r.account, { star: false }) },
       { key: 'v', label: inbound ? 'Deposited' : 'Withdrew', n: true, render: r => usd(inbound ? r.deposits : r.withdrawals) },
       { key: 'n', label: 'Net', n: true, render: r => pnl(r.net) }
-    ], rows, rowAttrs: link }) : empty(`No ${inbound ? 'deposits' : 'withdrawals'} in this window`);
+    ], rows, rowAttrs: link }) : empty(`No ${inbound ? 'deposits' : 'withdrawals'} in this window`));
   }
   function renderWindows() {
     const ws = data.windows;
     const rows = [['24h', '24 hours'], ['7d', '7 days'], ['30d', '30 days'], ['all', 'All-time']].map(([k, label]) => ({ k, label, ...(ws[k] ?? {}) }));
-    $('windows').innerHTML = table({ id: 'win', compact: true, columns: [
-      { key: 'label', label: 'Window', render: r => `${r.label}${r.k === 'all' && backfill && !backfill.complete ? ' <span class="tag warn" title="History is still being indexed">partial</span>' : ''}${r.k === w ? ' <span class="tag accent">shown</span>' : ''}` },
+    morph($('windows'), table({ id: 'win', compact: true, columns: [
+      { key: 'label', label: 'Window', render: r => `${r.label}${r.k === 'all' && backfill && !backfill.complete ? ' <span class="tag warn" title="History is still being indexed">partial</span>' : ''}${r.k === dataWin ? ' <span class="tag accent">shown</span>' : ''}` },
       { key: 'volume', label: 'Volume', n: true, render: r => usd(r.volume) },
       { key: 'fees', label: 'Fees', n: true, render: r => usd(r.fees) },
       { key: 'traders', label: 'Traders', n: true, render: r => int(r.traders) }
-    ], rows, rowAttrs: r => `class="link" data-href="/?window=${r.k}"` });
+    ], rows, rowAttrs: r => `class="link" data-href="/?window=${r.k}"` }));
   }
 
   // Market-share context from DefiLlama's open-interest overview (external, labelled as such).
-  async function loadLandscape() {
+  let lsAsk = 0;
+  async function loadLandscape(fresh = false) {
+    const grid = $('landscape-grid'), ask = ++lsAsk;
+    if (!grid) return;
     let l;
-    try { l = await get('landscape', { maxAge: 300000 }); } catch { $('landscape-grid').previousElementSibling.remove(); $('landscape-grid').remove(); return; }
-    if (!alive) return;
+    try { l = await get('landscape', { maxAge: fresh ? 0 : 300000 }); } catch (e) {
+      if (!alive || ask !== lsAsk) return;
+      if (e.status !== 404) throw e;
+      grid.previousElementSibling.remove(); grid.remove(); return; // turned off on this server
+    }
+    if (!alive || ask !== lsAsk) return;
+    lsLoaded = true;
     const src = `<a href="${esc(l.source.url)}" target="_blank" rel="noopener noreferrer">${esc(l.source.name)}</a>, ${ago(Math.round(l.fetched_at / 1000))}`;
     const bar = (v, share) => `${usd(v)}<span class="track"><i style="width:${Math.max(2, Math.min(100, share ?? 0))}%"></i></span>`;
     const name = r => (r.self || r.name === 'Perpl' ? `<span class="mkt"><img class="tk" src="/img/venues/perpl.png" alt="" width="16" height="16"><b>${esc(r.name)}</b></span>` : esc(r.name));
     // The five largest venues give the scale; Perpl's own row follows them.
     const top = l.top.slice(0, 5);
     if (l.perpl && l.perpl.rank > top.length) top.push({ rank: l.perpl.rank, name: 'Perpl', oi: l.perpl.oi, share_pct: l.perpl.share_pct });
-    $('ls-meta').innerHTML = l.perpl ? `Perpl #${int(l.perpl.rank)} of ${int(l.venues)} · ${pct(l.perpl.share_pct, { digits: 2 })} · ${src}` : src;
-    $('ls-all').innerHTML = table({ id: 'ls-all', compact: true, columns: [
+    morph($('ls-meta'), l.perpl ? `Perpl #${int(l.perpl.rank)} of ${int(l.venues)} · ${pct(l.perpl.share_pct, { digits: 2 })} · ${src}` : src);
+    morph($('ls-all'), table({ id: 'ls-all', compact: true, columns: [
       { key: 'r', label: '#', render: r => `<span class="rank">${r.rank}</span>` },
       { key: 'n', label: 'Venue', render: name },
       { key: 'o', label: 'Open interest', n: true, center: true, cls: 'cell-bar', render: r => bar(r.oi, r.share_pct / (l.top[0]?.share_pct || 1) * 100) },
       { key: 's', label: 'Share', n: true, render: r => `<span class="muted">${pct(r.share_pct, { digits: 2 })}</span>` }
-    ], rows: top, rowAttrs: r => (r.name === 'Perpl' ? 'class="hl"' : '') });
-    $('ls-chain-meta').innerHTML = l.perpl?.share_of_chain_pct !== null && l.perpl ? `Perpl ${pct(l.perpl.share_of_chain_pct, { digits: 1 })} of ${esc(l.chain.name)} · ${src}` : src;
-    $('ls-chain').innerHTML = table({ id: 'ls-chain', compact: true, emptyText: 'No venues listed', columns: [
+    ], rows: top, rowAttrs: r => (r.name === 'Perpl' ? 'class="hl"' : '') }));
+    morph($('ls-chain-meta'), l.perpl?.share_of_chain_pct !== null && l.perpl ? `Perpl ${pct(l.perpl.share_of_chain_pct, { digits: 1 })} of ${esc(l.chain.name)} · ${src}` : src);
+    morph($('ls-chain'), table({ id: 'ls-chain', compact: true, emptyText: 'No venues listed', columns: [
       { key: 'n', label: 'Venue', render: name },
       { key: 'o', label: 'Open interest', n: true, center: true, cls: 'cell-bar', render: r => bar(r.oi, r.share_pct) },
       { key: 's', label: 'Share', n: true, render: r => `<span class="muted">${pct(r.share_pct, { digits: 1 })}</span>` }
-    ], rows: l.chain.venues, rowAttrs: r => (r.self ? 'class="hl"' : '') });
+    ], rows: l.chain.venues, rowAttrs: r => (r.self ? 'class="hl"' : '') }));
   }
+  const startLandscape = (fresh = false) => run('landscape', () => loadLandscape(fresh), e => {
+    logBug(e);
+    if (!lsLoaded) for (const id of ['ls-chain', 'ls-all']) panelError($(id), undefined, () => startLandscape());
+  });
 
   // Live: finalized trades stream in; proposed ones appear first, dimmed. A batch
   // arrives in block order (oldest first), so each row goes on top in turn.
@@ -373,49 +452,53 @@ export function mount(el, { query, setQuery }) {
     if (s.stage === 'voted') { for (const r of tape) if (r.proposed && Number(r.block) === s.block) r.votedMs = s.ms; return; }
     if (s.stage === 'finalized') { finalMs.push(s.ms); if (finalMs.length > 50) finalMs.shift(); renderSpeed(); }
   }));
-  off.push(stream.on('proposed', p => { for (const r of p.trades) if (!tape.some(x => x.tx === r.tx)) tape.unshift({ ...r, proposed: true, fresh: true }); tape.length = Math.min(tape.length, 400); if (!finalMs.length) $('tape-meta').textContent = 'Proposed + finalized blocks · UTC'; renderTape(); }));
+  off.push(stream.on('proposed', p => { for (const r of p.trades) if (!tape.some(x => x.tx === r.tx)) tape.unshift({ ...r, proposed: true, fresh: true }); tape.length = Math.min(tape.length, 400); if (!finalMs.length) morph($('tape-meta'), 'Proposed + finalized blocks · UTC'); renderTape(); }));
   off.push(stream.on('backfill', p => {
     const finished = backfill && !backfill.complete && p.complete;
     backfill = p;
-    if (!alive || !series) return;
-    if (finished) loadTrends(true);
+    if (!alive) return;
+    if (finished) startTrends(true);
     else for (const id of ['oi', 'tvl']) { const n = $(id)?.querySelector('.empty-state'); if (n) n.textContent = historyNote(); }
   }));
-  get('health', { maxAge: 30000 }).then(h => { backfill = h.index?.backfill ?? null; }).catch(() => {});
-  off.push(stream.on('liquidations', () => get('liquidations?limit=8', { maxAge: 0 }).then(l => alive && renderLiqs(l)).catch(() => {})));
-  // Longer windows: the push carries 24h figures only, so it just triggers a throttled refetch.
-  off.push(stream.on('protocol', () => {
-    if (w === '24h' || !data || !alive || Date.now() - lastLongLoad < LONG_WINDOW_REFRESH_MS) return;
-    lastLongLoad = Date.now();
-    get(`protocol?window=${w}`, { maxAge: 0 }).then(p => { if (!alive || w === '24h') return; data = p; renderKpis(); renderWindows(); }).catch(() => {});
-    get(`flows?window=${w}`, { maxAge: 0 }).then(f => alive && renderFlows(f)).catch(() => {});
+  get('health', { maxAge: 30000 }).then(h => { backfill = h.index?.backfill ?? null; if (alive && data && backfill && !backfill.complete) renderWindows(); }).catch(() => {});
+  off.push(stream.on('liquidations', () => startLiqs(true)));
+  off.push(stream.on('protocol', p => {
+    // The push carries 24h figures only.
+    if (w === '24h' && dataWin === '24h') { data = { ...data, headline: p.headline, current: p.current, markets: data.markets.map(m => { const u = p.markets.find(x => x.id === m.id); return u ? { ...m, mark: u.mark ?? m.mark, volume: u.volume, change_pct: u.change_pct, open_interest: u.open_interest ?? m.open_interest, funding: u.funding ?? m.funding } : m; }) }; renderKpis(); }
+    if (Date.now() - lastQuiet < QUIET_REFRESH_MS) return;
+    lastQuiet = Date.now();
+    startFlows(true);
+    if (w === '24h' || dataWin !== w) return;
+    // Longer windows: refetch their totals. A press since then owns the cards, so this answer is dropped.
+    const ask = mainAsk, win = w;
+    get(`protocol?window=${win}`, { maxAge: 0 }).then(d => { if (!alive || ask !== mainAsk || win !== w) return; data = d; renderKpis(); renderWindows(); }).catch(() => {});
   }));
-  let lastFlowLoad = Date.now();
-  off.push(stream.on('protocol', () => {
-    if (w !== '24h' || !alive || Date.now() - lastFlowLoad < LONG_WINDOW_REFRESH_MS) return;
-    lastFlowLoad = Date.now();
-    get('flows?window=24h', { maxAge: 0 }).then(f => { if (alive && w === '24h') renderFlows(f); }).catch(() => {});
-  }));
-  off.push(stream.on('protocol', p => { if (w !== '24h' || !data || !alive) return; data = { ...data, headline: p.headline, current: p.current, markets: data.markets.map(m => { const u = p.markets.find(x => x.id === m.id); return u ? { ...m, mark: u.mark ?? m.mark, volume: u.volume, change_pct: u.change_pct, open_interest: u.open_interest ?? m.open_interest, funding: u.funding ?? m.funding } : m; }) }; renderKpis(); }));
-  const timer = setInterval(() => { loadVolume(true).catch(() => {}); if (w !== '24h') load().catch(() => {}); else get(seriesPath(), { maxAge: 0 }).then(s => { if (alive) series = s; }).catch(() => {}); loadTrends(true); }, 60000);
+  const timer = setInterval(() => { startVolume(true); startMain(true); startTrends(true); }, 60000);
 
-  load().catch(error => { $('kpis').innerHTML = `<div class="empty-state">Could not load protocol data (${esc(error.message)})</div>`; });
-  loadFeeds().catch(() => {});
-  loadLandscape();
+  renderBucket();
+  startMain(); startVolume(); startTrends();
+  startTape(); startLiqs(); startFlows(); startLandscape();
+  const stopFit = fitRows($('tape'));
 
   return {
     onSeg(name, v) {
-      if (name.startsWith('tw:')) { const id = name.slice(3); pw[id] = v; $(`${id}-win`).innerHTML = winCtl(id); $(id).innerHTML = skChart(); loadTrend(id).catch(() => {}); return; }
+      if (name.startsWith('tw:')) { const id = name.slice(3); pw[id] = v; morph($(`${id}-win`), winCtl(id)); dim(id); dim(`${id}-v`); startTrend(id); return; }
       if (name === 'window') setQuery({ window: v === DEFAULT_WINDOW ? null : v });
-      if (name === 'min') { minSize = v; try { localStorage.setItem('ps.minsize', v); } catch { /* storage unavailable */ } $('minsize').innerHTML = segSm('min', MIN_SIZES, minSize); renderTape(); }
-      if (name === 'flowv') { flowView = v; $('flowview').innerHTML = segSm('flowv', FLOW_VIEWS, flowView); renderFlows(); }
-      if (name === 'bucket') { bucket = v; renderBucket(); $('main-chart').innerHTML = skChart(); loadVolume().catch(() => {}); return; }
-      if (name === 'vw') { vw = v; bucket = null; $('vwin').innerHTML = segSm('vw', WINDOWS, vw); renderBucket(); $('main-chart').innerHTML = skChart(); loadVolume().catch(() => {}); return; }
-      if (name === 'feesv') { feeView = v; $('fees-mode').innerHTML = segSm('feesv', FEE_VIEWS, feeView); renderFees(); }
+      if (name === 'min') { minSize = v; try { localStorage.setItem('ps.minsize', v); } catch { /* storage unavailable */ } morph($('minsize'), segSm('min', MIN_SIZES, minSize)); renderTape(); }
+      if (name === 'flowv') { flowView = v; morph($('flowview'), segSm('flowv', FLOW_VIEWS, flowView)); renderFlows(); }
+      if (name === 'bucket') { bucket = v; renderBucket(); pressVolume(); return; }
+      if (name === 'vw') { vw = v; bucket = null; morph($('vwin'), segSm('vw', WINDOWS, vw)); renderBucket(); pressVolume(); return; }
+      if (name === 'feesv') { feeView = v; morph($('fees-mode'), segSm('feesv', FEE_VIEWS, feeView)); renderFees(); }
     },
-    onAction(a, t) { if (a === 'toggle') { t.classList.toggle('off'); toggleSeries($('main-chart'), t.dataset.name); } },
-    update(q) { const nw = WINDOWS.some(([v]) => v === q.get('window')) ? q.get('window') : DEFAULT_WINDOW; if (nw === w) return; w = nw; $('win').innerHTML = seg('window', WINDOWS, w);
-      load().catch(() => {}); get(`flows?window=${w}`).then(f => alive && renderFlows(f)).catch(() => {}); },
-    destroy() { alive = false; clearInterval(timer); off.forEach(f => f()); }
+    onAction(a, t) { if (a === 'toggle') { const name = t.dataset.name, hide = !hidden.has(name); if (hide) hidden.add(name); else hidden.delete(name); t.classList.toggle('off', hide); toggleSeries($('main-chart'), name); } },
+    update(q) {
+      const nw = windowOf(q); if (nw === w) return;
+      w = nw; morph($('win'), seg('window', WINDOWS, w));
+      for (const id of ['kpis', 'windows', 'flowlist']) dim(id);
+      startMain(); startFlows();
+    },
+    // Back on the stream or the API, and after a cached open: every region asks again, quietly.
+    refresh() { startMain(true); startVolume(true); startTrends(true); startTape(true); startLiqs(true); startFlows(true); startLandscape(true); },
+    destroy() { alive = false; clearInterval(timer); off.forEach(f => f()); Object.values(stops).forEach(stop => stop()); stopFit(); }
   };
 }
