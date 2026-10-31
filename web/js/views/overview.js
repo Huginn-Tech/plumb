@@ -32,7 +32,7 @@ const liqPage = win => withWindow('/liquidations', win, '30d');
 // A whole card is the link: the anchor sits on the figure, and stretches over the card in CSS.
 const cardLink = (name, value, href, page) => `<a class="kpi-link" href="${esc(href)}" aria-label="${esc(`${name} ${value}, open ${page}`)}">${value}</a>`;
 // A skeleton or an error gives way to the table: patched over, its inline height would stay on the table's wrapper.
-const fresh = (node, html) => { node.querySelector(':scope > .sk-rows, :scope > .panel-error')?.remove(); morph(node, html); };
+const fill = (node, html) => { node.querySelector(':scope > .sk-rows, :scope > .panel-error')?.remove(); morph(node, html); };
 const logBug = e => { if (e?.status === undefined && e?.code === undefined) console.error(e); };
 
 export function mount(el, { query, setQuery }) {
@@ -363,8 +363,8 @@ export function mount(el, { query, setQuery }) {
     const rows = tape.filter(r => (num(r.notional) ?? 0) >= min);
     $('tape-count').textContent = rows.length ? `${int(Math.min(rows.length, 60))} shown` : '';
     // Until the first answer the skeleton or the error stays: no rows yet says nothing about the market.
-    if (!rows.length) { if (tapeLoaded) fresh($('tape'), empty(tape.length ? 'No trades of this size yet' : 'Waiting for trades')); return; }
-    fresh($('tape'), table({ id: 'tape', compact: true, columns: [
+    if (!rows.length) { if (tapeLoaded) fill($('tape'), empty(tape.length ? 'No trades of this size yet' : 'Waiting for trades')); return; }
+    fill($('tape'), table({ id: 'tape', compact: true, columns: [
       { key: 't', label: 'Time (UTC)', render: r => `<span class="muted num">${timeOnly(r.ts)}</span>` },
       { key: 'm', label: 'Market', cls: 'mkt-cell', render: r => mktLink(r.market, r.symbol) },
       { key: 's', label: 'Action', tip: 'What the taker did. Green: bought. Red: sold.', render: tradeAction },
@@ -374,7 +374,7 @@ export function mount(el, { query, setQuery }) {
     for (const r of tape) r.fresh = false;
   }
   function renderLiqs(l) {
-    fresh($('liqs'), l.rows.length ? table({ id: 'liqs', compact: true, columns: [
+    fill($('liqs'), l.rows.length ? table({ id: 'liqs', compact: true, columns: [
       { key: 'm', label: 'Market', cls: 'mkt-cell', render: r => mktLink(r.market, r.symbol) },
       { key: 's', label: 'Side', render: r => sideTag(r.side) },
       { key: 'v', label: 'Notional', n: true, render: r => amt(r.notional) },
@@ -389,7 +389,7 @@ export function mount(el, { query, setQuery }) {
     const link = r => `class="link" data-href="/wallet/${esc(r.address || r.account)}"`;
     if (flowView === 'recent') {
       const rows = (f.recent ?? []).slice(0, LIST_ROWS);
-      fresh(node, rows.length ? table({ id: 'flowlist', compact: true, columns: [
+      fill(node, rows.length ? table({ id: 'flowlist', compact: true, columns: [
         { key: 'k', label: 'Type', render: r => `<span class="${r.kind === 'deposit' ? 'pos' : 'neg'}">${r.kind === 'deposit' ? 'Deposit' : 'Withdrawal'}</span>` },
         { key: 'a', label: 'Wallet', render: r => addr(r.address, r.account, { star: false }) },
         { key: 'v', label: 'Amount', n: true, render: r => amt(r.amount) },
@@ -398,7 +398,7 @@ export function mount(el, { query, setQuery }) {
       return;
     }
     const inbound = flowView === 'in', rows = ((inbound ? f.top_depositors : f.top_withdrawers) ?? []).slice(0, LIST_ROWS);
-    fresh(node, rows.length ? table({ id: 'flowlist', compact: true, columns: [
+    fill(node, rows.length ? table({ id: 'flowlist', compact: true, columns: [
       { key: 'a', label: 'Wallet', render: r => addr(r.address, r.account, { star: false }) },
       { key: 'v', label: inbound ? 'Deposited' : 'Withdrew', n: true, render: r => amt(inbound ? r.deposits : r.withdrawals) },
       { key: 'n', label: 'Net flow', n: true, render: r => amt(r.net, { sign: true }) }
@@ -407,7 +407,7 @@ export function mount(el, { query, setQuery }) {
   function renderWindows() {
     const ws = data.windows;
     const rows = [['24h', '24 hours'], ['7d', '7 days'], ['30d', '30 days'], ['all', 'All-time']].map(([k, label]) => ({ k, label, ...(ws[k] ?? {}) }));
-    fresh($('windows'), table({ id: 'win', compact: true, columns: [
+    fill($('windows'), table({ id: 'win', compact: true, columns: [
       { key: 'label', label: 'Period', render: r => `<a href="${withWindow('/', r.k)}">${r.label}</a>${r.k === 'all' && backfill && !backfill.complete ? ' <span class="tag warn" title="History is still being indexed">partial</span>' : ''}${r.k === dataWin ? ' <span class="tag accent">shown</span>' : ''}<div class="sub">${int(r.trades)} trades</div>` },
       { key: 'volume', label: 'Volume', n: true, render: r => amt(r.volume) },
       { key: 'fees', label: 'Fees', n: true, render: r => amt(r.fees) },
@@ -435,14 +435,14 @@ export function mount(el, { query, setQuery }) {
     const top = l.top.slice(0, 5);
     if (l.perpl && l.perpl.rank > top.length) top.push({ rank: l.perpl.rank, name: 'Perpl', oi: l.perpl.oi, share_pct: l.perpl.share_pct });
     morph($('ls-meta'), keepDots(l.perpl ? `Perpl #${int(l.perpl.rank)} of ${int(l.venues)} · ${pct(l.perpl.share_pct, { digits: 2 })} · ${src}` : src));
-    fresh($('ls-all'), table({ id: 'ls-all', compact: true, columns: [
+    fill($('ls-all'), table({ id: 'ls-all', compact: true, columns: [
       { key: 'r', label: '#', render: r => `<span class="rank">${r.rank}</span>` },
       { key: 'n', label: 'Venue', render: name },
       { key: 'o', label: 'Open interest', n: true, center: true, cls: 'cell-bar', render: r => bar(r.oi, r.share_pct / (l.top[0]?.share_pct || 1) * 100) },
       { key: 's', label: 'Share', n: true, render: r => `<span class="muted">${pct(r.share_pct, { digits: 2 })}</span>` }
     ], rows: top, rowAttrs: r => (r.name === 'Perpl' ? 'class="hl"' : '') }));
     morph($('ls-chain-meta'), keepDots(l.perpl?.share_of_chain_pct !== null && l.perpl ? `Perpl ${pct(l.perpl.share_of_chain_pct, { digits: 1 })} of ${esc(l.chain.name)} · ${src}` : src));
-    fresh($('ls-chain'), table({ id: 'ls-chain', compact: true, emptyText: 'No venues listed', columns: [
+    fill($('ls-chain'), table({ id: 'ls-chain', compact: true, emptyText: 'No venues listed', columns: [
       { key: 'n', label: 'Venue', render: name },
       { key: 'o', label: 'Open interest', n: true, center: true, cls: 'cell-bar', render: r => bar(r.oi, r.share_pct) },
       { key: 's', label: 'Share', n: true, render: r => `<span class="muted">${pct(r.share_pct, { digits: 1 })}</span>` }
