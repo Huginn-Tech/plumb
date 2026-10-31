@@ -49,24 +49,27 @@
 }
 
 * { box-sizing: border-box; }
-html { background: var(--bg); }
+/* The scrollbar's track stays, so the page keeps one width while it fills in. */
+html { background: var(--bg); overflow-y: scroll; }
 body {
   margin: 0; min-height: 100vh; color: var(--text); font: 400 14px/1.45 var(--font);
   background: radial-gradient(1200px 420px at 50% -120px, var(--bg-glow), transparent 70%), var(--bg);
   -webkit-font-smoothing: antialiased; font-feature-settings: 'ss01';
+  /* The footer sits at the bottom of a short page. */
+  display: flex; flex-direction: column;
 }
 a { color: inherit; text-decoration: none; }
 a:hover { color: var(--accent); }
 button, input, select { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
 .num, td.n, td.c, .kpi-value { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
-.mono { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0; }
+.mono { font-family: var(--mono); font-size: 13px; letter-spacing: 0; }
 .muted { color: var(--text-2); }
 .faint { color: var(--text-3); }
 .pos { color: var(--long); }
 .neg { color: var(--short); }
 .warn-text { color: var(--warn); }
-.hidden { display: none !important; }
+.hidden, [hidden] { display: none !important; }
 
 /* ---------- header ---------- */
 .top { position: sticky; top: 0; z-index: 20; background: rgba(0, 0, 0, 0.78); backdrop-filter: saturate(140%) blur(14px); border-bottom: 1px solid var(--line); }
@@ -74,9 +77,9 @@ button, input, select { font: inherit; color: inherit; }
 .brand { display: flex; align-items: center; gap: 9px; color: var(--text); flex: none; }
 .brand:hover { color: var(--text); }
 .brand-mark { width: 24px; height: 24px; flex: none; }
-.brand-name { font-weight: 600; font-size: 15px; letter-spacing: -0.02em; }
+.brand-name { font-weight: 600; font-size: 14px; letter-spacing: -0.02em; }
 .nav { display: flex; gap: 2px; }
-.nav a { padding: 7px 11px; border-radius: var(--radius-sm); color: var(--text-2); font-weight: 500; font-size: 13.5px; }
+.nav a { padding: 7px 11px; border-radius: var(--radius-sm); color: var(--text-2); font-weight: 500; font-size: 13px; }
 .nav a:hover { color: var(--text); background: rgba(255, 255, 255, 0.04); }
 .nav a.active { color: var(--text); background: rgba(255, 255, 255, 0.06); }
 .search { position: relative; flex: 1; max-width: 420px; margin-left: auto; display: flex; align-items: center; height: 36px; padding: 0 10px; gap: 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); }
@@ -105,7 +108,7 @@ button, input, select { font: inherit; color: inherit; }
 .live.bad .dot { background: var(--short); }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(129, 199, 132, 0.55); } 70% { box-shadow: 0 0 0 7px rgba(129, 199, 132, 0); } 100% { box-shadow: 0 0 0 0 rgba(129, 199, 132, 0); } }
 
-.banner { max-width: var(--page); margin: 12px auto 0; padding: 0 var(--gutter); }
+.banner { width: 100%; max-width: var(--page); margin: 12px auto 0; padding: 0 var(--gutter); }
 .banner-inner { display: flex; align-items: center; gap: 14px; padding: 10px 16px; background: linear-gradient(90deg, rgba(111, 92, 255, 0.12), rgba(111, 92, 255, 0.02) 60%), var(--surface); box-shadow: var(--card-edge); border-radius: var(--radius); font-size: 13px; color: var(--text-2); }
 .banner-inner b { color: var(--text); font-weight: 500; }
 @media (max-width: 860px) { .banner-inner { flex-wrap: wrap; gap: 6px 12px; } .banner-inner .faint { flex-basis: 100%; } .banner-inner .bar { flex: 1; } }
@@ -114,6 +117,7 @@ button, input, select { font: inherit; color: inherit; }
 
 /* ---------- layout ---------- */
 .view { max-width: var(--page); margin: 0 auto; padding: 20px var(--gutter) 48px; outline: none; }
+#view { flex: 1; width: 100%; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin: 8px 0 18px; flex-wrap: wrap; }
 .page-head h1 { margin: 0; font-size: 28px; font-weight: 400; letter-spacing: -0.025em; }
 .page-head .sub { color: var(--text-2); font-size: 14px; margin-top: 6px; }
@@ -127,14 +131,15 @@ button, input, select { font: inherit; color: inherit; }
 .hero-muted { color: var(--text-3); font-weight: 400; }
 .hero-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .hero-actions .btn svg { width: 13px; height: 13px; margin-left: 2px; vertical-align: -1px; }
-@media (max-width: 860px) { .page-head.hero h1 { font-size: 26px; line-height: 30px; } .hero-logo { width: 28px; height: 28px; } }
+@media (max-width: 860px) { .page-head.hero h1 { font-size: 28px; line-height: 30px; } .hero-logo { width: 28px; height: 28px; } }
 .stack { display: flex; flex-direction: column; gap: 14px; }
 .grid { display: grid; gap: 14px; }
 .g-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .g-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .g-main { grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr); }
 @media (max-width: 1300px) { .top-inner { gap: 18px; } .nav a { padding: 7px 9px; } }
-@media (max-width: 1100px) { .g-2, .g-3, .g-main { grid-template-columns: minmax(0, 1fr); } .nav a { padding: 7px 8px; font-size: 13px; } .search kbd { display: none; } }
+@media (max-width: 1100px) { .g-3, .g-main { grid-template-columns: minmax(0, 1fr); } .nav a { padding: 7px 8px; font-size: 13px; } .search kbd { display: none; } }
+@media (max-width: 999px) { .g-2 { grid-template-columns: minmax(0, 1fr); } }
 /* Phones: the nav becomes a second, horizontally scrolling row. */
 @media (max-width: 860px) {
   .top-inner { height: auto; min-height: 56px; flex-wrap: wrap; gap: 6px 12px; padding-top: 10px; padding-bottom: 4px; }
@@ -143,9 +148,9 @@ button, input, select { font: inherit; color: inherit; }
   .nav a { flex: none; padding: 6px 10px; }
   .search { min-width: 0; }
   .search kbd { display: none; }
-  .live span:last-child { display: none; }
   .ticker { display: none; }
 }
+@media (max-width: 640px) { .live span:last-child { display: none; } }
 @media (max-width: 420px) { .brand-name { display: none; } }
 
 .panel { background: var(--surface); border-radius: var(--radius); box-shadow: var(--card-edge); min-width: 0; }
@@ -163,10 +168,13 @@ button, input, select { font: inherit; color: inherit; }
 /* ---------- controls ---------- */
 .seg { display: inline-flex; padding: 2px; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--line); border-radius: var(--radius); gap: 2px; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .seg::-webkit-scrollbar { display: none; }
-.seg button { border: 0; background: transparent; color: var(--text-2); padding: 5px 11px; border-radius: var(--radius-sm); font-size: 12.5px; font-weight: 500; cursor: pointer; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.seg button { border: 0; background: transparent; color: var(--text-2); padding: 5px 11px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500; cursor: pointer; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .seg button:hover { color: var(--text); }
 /* The chosen option is filled, so it reads at a glance. */
-.seg button.on, .seg button.on:hover { background: var(--accent); color: #0e0d10; font-weight: 600; }
+.seg button.on, .seg button.on:hover { background: var(--accent); color: #0e0d10; font-weight: 500; }
+/* Switch rows scroll, which clips a ring drawn outside the button. */
+.seg button:focus-visible, .tabs button:focus-visible { outline-offset: -2px; }
+.seg button.on:focus-visible { outline-color: #0e0d10; }
 .tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--line); padding: 0 16px; overflow-x: auto; scrollbar-width: none; scroll-behavior: smooth; }
 .tabs::-webkit-scrollbar { display: none; }
 .tabs button { border: 0; background: none; padding: 12px 0 11px; color: var(--text-2); font-weight: 500; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; flex: none; }
@@ -187,7 +195,7 @@ button, input, select { font: inherit; color: inherit; }
   /* The desktop nav never scrolls, and a mask would clip its focus rings. */
   @media (min-width: 861px) { .nav { mask-image: none; } }
 }
-.btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: var(--radius-sm); border: 0; background: var(--surface-2); box-shadow: var(--control-edge); color: var(--text); font-size: 12.5px; font-weight: 500; cursor: pointer; }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: var(--radius-sm); border: 0; background: var(--surface-2); box-shadow: var(--control-edge); color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer; }
 .btn:hover { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 0 1px rgba(162, 164, 255, 0.45); color: var(--text); }
 .btn.primary { background: var(--accent-strong); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14); }
 .btn.primary:hover { background: var(--accent-hover); }
@@ -225,13 +233,25 @@ button, input, select { font: inherit; color: inherit; }
 .kpi-note { color: var(--text-3); font-size: 12px; flex-basis: 100%; min-width: 0; text-wrap: balance; }
 /* What a KPI's change compares with. */
 .kpi-basis { color: var(--text-3); font-size: 11px; margin-left: -4px; white-space: nowrap; flex: none; }
+/* Each part carries its dot in a gutter on its left and the gutter of a part that
+   starts a line is clipped, so a wrapped line neither starts nor ends on a dot. */
+.dots { display: flex; flex-wrap: wrap; margin-left: -11px; clip-path: inset(0 0 0 11px); }
+.dots .kn { position: relative; padding-left: 11px; min-width: 0; }
+.dots .kn > i { position: absolute; left: 0; width: 11px; text-align: center; font-style: normal; }
+.head-value .dots { justify-content: flex-end; }
+.trend .head-value .dots { justify-content: flex-start; }
 .kpi .spark { height: 44px; margin: auto -18px 0; padding-top: 10px; }
 .delta { font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
 .delta.up { color: var(--long); }
 .delta.down { color: var(--short); }
 .delta.flat { color: var(--text-3); }
-.info-tip { display: inline-flex; flex: none; width: 13px; height: 13px; border-radius: 50%; border: 1px solid var(--text-3); color: var(--text-3); font-size: 9px; align-items: center; justify-content: center; cursor: help; transition: color 0.12s, background 0.12s, border-color 0.12s; outline: none; }
+.info-tip { position: relative; display: inline-flex; flex: none; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--text-3); color: var(--text-3); font-size: 12px; align-items: center; justify-content: center; cursor: help; transition: color 0.12s, background 0.12s, border-color 0.12s; outline: none; }
 .info-tip:hover, .info-tip:focus-visible { color: #fff; background: var(--accent-strong); border-color: var(--accent-strong); }
+@media (hover: none) { .info-tip::after { content: ''; position: absolute; inset: -8px; } } /* a finger-sized target */
+/* A column head with a note: the label is the control, an (i) per column would not fit. */
+.th-tip { text-decoration: underline dotted var(--text-3); text-underline-offset: 3px; cursor: help; }
+.th-tip:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.t th[tabindex]:focus-visible { outline-offset: -2px; }
 /* The one hover note (ui.js): a framed card, short text. */
 .tip-pop { position: fixed; left: 0; top: 0; z-index: 60; max-width: 280px; padding: 8px 11px; background: #1c1b20; border: 1px solid rgba(162, 164, 255, 0.24); border-radius: 8px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55); color: var(--text); font-size: 12px; line-height: 1.5; font-weight: 400; letter-spacing: 0; text-align: left; white-space: normal; pointer-events: none; }
 .tip-pop[hidden] { display: none; }
@@ -251,6 +271,7 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
 .t th.sort { cursor: pointer; }
 .t th.sort:hover { color: var(--text); }
 .t th.sorted { color: var(--text); }
+.sort-ar { position: absolute; margin-left: 3px; }
 /* A row's height comes from the kind of table, never from its content; the
    system block at the end of this file has the heights. */
 .t td { padding: 4px 12px; height: 44px; vertical-align: middle; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -260,6 +281,8 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
 .t tbody tr:hover { background: rgba(162, 164, 255, 0.07); }
 .t td:first-child, .t th:first-child { padding-left: 18px; }
 .t td:last-child, .t th:last-child { padding-right: 18px; }
+/* On a tablet the inner cells give up a little width before a table has to scroll. */
+@media (min-width: 641px) and (max-width: 1180px) { .t th, .t td { padding-left: 10px; padding-right: 10px; } }
 .t.compact td { height: 38px; padding-top: 3px; padding-bottom: 3px; }
 /* The live tape sits in the narrow column: tighter cells so every column fits. */
 #tape .t th, #tape .t td { padding-left: 8px; padding-right: 8px; }
@@ -289,7 +312,7 @@ td.c.cell-bar .track { right: auto; left: 50%; transform: translateX(-50%); }
 .mkt .tk { border-radius: 50%; flex: none; box-shadow: 0 0 0 1px var(--line-2); }
 .tk-letter { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; flex: none; color: #fff; font-style: normal; font-weight: 600; line-height: 1; }
 .mkt .nm { color: var(--text-3); font-weight: 400; font-size: 12px; }
-.side { font-size: 11.5px; font-weight: 600; padding: 2px 6px; border-radius: 3px; letter-spacing: 0.02em; }
+.side { font-size: 12px; font-weight: 600; padding: 2px 6px; border-radius: 3px; letter-spacing: 0.02em; }
 .side.long { color: var(--long); background: var(--long-soft); }
 .side.short { color: var(--short); background: var(--short-soft); }
 .tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; padding: 2px 6px; border-radius: 3px; color: var(--text-2); background: rgba(255, 255, 255, 0.06); }
@@ -297,13 +320,13 @@ td.c.cell-bar .track { right: auto; left: 50%; transform: translateX(-50%); }
 .tag.warn { color: var(--warn); background: rgba(255, 167, 38, 0.1); }
 .tag.bad { color: var(--short); background: var(--short-soft); }
 .tag.good { color: var(--long); background: var(--long-soft); }
-.rank-pill { display: inline-block; min-width: 34px; padding: 1px 6px; border-radius: 3px; font-size: 11.5px; font-weight: 500; text-align: center; color: var(--text-2); background: rgba(255, 255, 255, 0.06); font-variant-numeric: tabular-nums; }
+.rank-pill { display: inline-block; min-width: 34px; padding: 1px 6px; border-radius: 3px; font-size: 12px; font-weight: 500; text-align: center; color: var(--text-2); background: rgba(255, 255, 255, 0.06); font-variant-numeric: tabular-nums; }
 /* Not ".top": that is the site header (sticky, z-index), which a pill must never inherit. */
 .rank-pill.lead { color: var(--accent); background: var(--accent-soft); }
 .sub.tags { display: flex; gap: 4px; margin-top: 3px; }
-.sub.tags .tag { font-size: 10.5px; padding: 1px 5px; cursor: help; }
+.sub.tags .tag { font-size: 11px; padding: 1px 5px; cursor: help; }
 .addr { display: inline-flex; align-items: center; gap: 4px; }
-.addr a { font-family: var(--mono); font-size: 12.5px; }
+.addr a { font-family: var(--mono); font-size: 13px; }
 .ratio { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: rgba(255, 255, 255, 0.06); min-width: 64px; }
 .ratio i { display: block; height: 100%; }
 .ratio i.l { background: var(--long); }
@@ -314,13 +337,13 @@ td.c.cell-bar .track { right: auto; left: 50%; transform: translateX(-50%); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
 /* Dot legends name a chart's series in its card head, on the right. */
-.legend.dots { justify-content: flex-end; gap: 4px 12px; font-size: 11.5px; }
+.legend.dots { justify-content: flex-end; gap: 4px 12px; font-size: 12px; }
 .legend.dots:empty { display: none; }
 .chart { width: 100%; height: 300px; }
 .chart.sm { height: 200px; }
 .chart.lg { height: 360px; }
 .stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.stat { padding: 11px 16px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+.stat { padding: 11px 18px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
 .stat:nth-child(odd) { border-right: 1px solid var(--line); }
 /* A single-column list (.one) has no second column to divide from, and the line
    would sit on the card's edge. */
@@ -335,15 +358,15 @@ td.c.cell-bar .track { right: auto; left: 50%; transform: translateX(-50%); }
   .stat > span:first-child { flex: 1 1 0; white-space: normal; }
   .stat > span:last-child { flex: none; margin-left: auto; }
 }
-.insights { display: flex; flex-direction: column; gap: 8px; padding: 4px 16px 16px; }
+.insights { display: flex; flex-direction: column; gap: 8px; padding: 4px 18px 18px; }
 .insight { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--text-2); line-height: 1.5; }
 .insight .tag { flex: none; margin-top: 1px; min-width: 72px; justify-content: center; }
-.heat { display: grid; grid-template-columns: 28px repeat(24, minmax(0, 1fr)); gap: 2px; font-size: 10px; color: var(--text-3); }
+.heat { display: grid; grid-template-columns: 28px repeat(24, minmax(0, 1fr)); gap: 2px; font-size: 12px; color: var(--text-3); }
 .cal-wrap { display: flex; gap: 6px; overflow-x: auto; width: fit-content; max-width: 100%; margin: 0 auto; }
-.cal-days { display: grid; grid-template-rows: 14px repeat(7, 16px); gap: 3px; font-size: 10px; color: var(--text-3); line-height: 16px; }
+.cal-days { display: grid; grid-template-rows: 14px repeat(7, 16px); gap: 3px; font-size: 12px; color: var(--text-3); line-height: 16px; }
 .cal { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 16px); grid-auto-columns: 16px; gap: 3px; }
 .cal i { display: block; width: 16px; height: 16px; border-radius: 3px; }
-.cal-months { display: grid; grid-auto-flow: column; grid-auto-columns: 16px; gap: 3px; font-size: 10px; color: var(--text-3); height: 14px; margin-bottom: 3px; }
+.cal-months { display: grid; grid-auto-flow: column; grid-auto-columns: 16px; gap: 3px; font-size: 12px; color: var(--text-3); height: 14px; margin-bottom: 3px; }
 .cal-months span { white-space: nowrap; overflow: visible; }
 .cal-foot { margin-top: 10px; font-size: 12px; text-align: center; }
 .heat i { display: block; height: 14px; border-radius: 2px; background: rgba(162, 164, 255, 0.06); }
@@ -352,6 +375,18 @@ td.c.cell-bar .track { right: auto; left: 50%; transform: translateX(-50%); }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 .sk-line { height: 12px; margin: 10px 0; }
 .sk-block { height: 280px; }
+.chart { position: relative; }
+.chart > .sk-block { position: absolute; inset: 0; height: auto; } /* takes the chart's own height, never more */
+/* Rows of a table not drawn yet: a bar in the middle of each row, under the head's height. */
+.sk-rows { background: repeating-linear-gradient(to bottom, transparent 0 calc((var(--row) - 12px) / 2), rgba(255, 255, 255, 0.05) calc((var(--row) - 12px) / 2) calc((var(--row) + 12px) / 2), transparent calc((var(--row) + 12px) / 2) var(--row)); background-position: 18px 0; background-size: calc(100% - 36px) var(--row); background-repeat: repeat-y; border-top: var(--head) solid transparent; background-clip: padding-box; background-origin: padding-box; }
+.sk-in { display: inline-block; height: 12px; vertical-align: middle; }
+.sk-box { border-radius: 0; opacity: 0.6; }
+/* A region waiting for its next data keeps its content, dimmed after a short delay
+   so a fast answer never flickers. */
+.is-stale { opacity: 0.5; transition: opacity 0.12s linear 0.1s; }
+.chart.is-stale { opacity: 0.55; }
+/* A panel that could not load: a line and Retry, at the height the panel had. */
+.panel-error { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; padding: 24px 16px; color: var(--text-2); font-size: 13px; text-align: center; }
 .wallet-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .wallet-id { display: flex; flex-direction: column; gap: 4px; }
 .wallet-id .big { font: 500 20px var(--mono); letter-spacing: -0.01em; }
@@ -378,9 +413,9 @@ td.c.cell-bar .track { right: auto; left: 50%; transform: translateX(-50%); }
 .status-dot.ok { background: var(--long); }
 .status-dot.warn { background: var(--warn); }
 .status-dot.bad { background: var(--short); }
-.doc { font-size: 13.5px; color: var(--text-2); line-height: 1.6; padding: 0 16px 16px; }
+.doc { font-size: 13px; color: var(--text-2); line-height: 1.6; padding: 0 16px 16px; }
 .doc code { font-family: var(--mono); font-size: 12px; color: var(--text); background: rgba(255, 255, 255, 0.05); padding: 1px 4px; border-radius: 3px; }
-.doc h3 { color: var(--text); font-size: 13.5px; margin: 16px 0 6px; }
+.doc h3 { color: var(--text); font-size: 13px; margin: 16px 0 6px; }
 /* The edge fades only follow scrolling, so they are not stopped. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
@@ -389,18 +424,22 @@ td.c.cell-bar .track { right: auto; left: 50%; transform: translateX(-50%); }
 /* panels whose body scrolls inside the row height set by a sibling */
 .panel.fill { display: flex; flex-direction: column; }
 .panel.fill > .scroll { flex: 1 1 0; min-height: 0; overflow: auto; }
-/* Stacked single column: the panel has no row height to fill, so give the list its own. */
-@media (max-width: 1100px) { .panel.fill > .scroll { flex: none; max-height: 460px; } }
-.seg.sm button { padding: 3px 8px; font-size: 11.5px; }
+.panel.fill > .panel-foot { margin-top: auto; }
+/* Stacked in one column the panel has no row height to fill, so the list gets its own. */
+@media (max-width: 1100px) { .g-main > .panel.fill > .scroll { flex: none; max-height: 460px; } }
+@media (max-width: 999px) { .panel.fill > .scroll { flex: none; max-height: 460px; } }
+.seg.sm button { padding: 3px 8px; font-size: 12px; }
 
 /* section labels with a rule (HyperScreener-style grouping) */
 .section-label { color: var(--text); font-size: 20px; font-weight: 400; letter-spacing: -0.02em; margin: 22px 0 2px; }
 .panel-head .desc { color: var(--text-3); font-size: 12px; margin-top: 2px; font-weight: 400; }
+/* A line filled in later holds its place. */
+.desc:empty::before, .page-head .sub:empty::before { content: '\00a0'; }
 /* A group header row in a table (the wallet's epochs and rolling windows). */
 .t tr.grp td { padding-top: 14px; padding-bottom: 6px; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); background: transparent; }
 .t tr.grp:hover td { background: transparent; }
 /* A quiet second line under a figure that keeps its column right-aligned. */
-.t .note { display: block; margin-top: 2px; font-size: 11.5px; color: var(--text-3); }
+.t .note { display: block; margin-top: 2px; font-size: 12px; color: var(--text-3); }
 .t .ep-name { display: inline-flex; align-items: center; gap: 6px; }
 .t .ep-csv { width: 20px; height: 20px; }
 .t .ep-short { display: none; }
@@ -418,15 +457,15 @@ td.c.cell-bar .track { right: auto; left: 50%; transform: translateX(-50%); }
 .ep-chips { display: inline-flex; gap: 6px; }
 .ep-chip { border: 0; background: transparent; color: var(--text); font: 500 12px var(--sans, inherit); padding: 4px 10px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line-2); cursor: pointer; white-space: nowrap; }
 .ep-chip:hover { color: var(--text); box-shadow: inset 0 0 0 1px rgba(162, 164, 255, 0.45); }
-.ep-chip.on { background: var(--accent); color: #0e0d10; box-shadow: none; font-weight: 600; }
+.ep-chip.on { background: var(--accent); color: #0e0d10; box-shadow: none; font-weight: 500; }
 .head-value { text-align: right; }
 .head-value .hv { font-size: 17px; font-weight: 500; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.2; }
-.head-value .hn { color: var(--text-3); font-size: 11.5px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.head-value .hn { color: var(--text-3); font-size: 12px; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .kpi-note [data-tip], .head-value .hn [data-tip] { cursor: help; text-decoration: underline dotted rgba(255, 255, 255, 0.3); text-underline-offset: 3px; }
 .trend .panel-head { align-items: flex-start; }
 .trend .panel-head h2 { color: var(--text-2); font-weight: 400; }
-.trend .head-value { text-align: left; margin-top: 6px; }
-.trend .head-value .hv { font-size: 26px; font-weight: 400; letter-spacing: -0.03em; line-height: 1.15; }
+.trend .head-value { text-align: left; margin-top: 6px; min-height: 54px; }
+.trend .head-value .hv { font-size: 28px; font-weight: 400; letter-spacing: -0.03em; line-height: 1.15; }
 .trend .head-value .hn { font-size: 12px; margin-top: 4px; text-wrap: balance; }
 .head-value .hn .nw { white-space: nowrap; }
 .trend .legend.dots { margin-top: 10px; max-width: 360px; }
@@ -439,8 +478,8 @@ td.c.cell-bar .track { right: auto; left: 50%; transform: translateX(-50%); }
 .legend .lg.off i { background: transparent !important; box-shadow: inset 0 0 0 1px var(--text-3); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 /* Order book ladder */
-.book { font-size: 12.5px; padding: 4px 0 8px; }
-.book-row { position: relative; display: grid; grid-template-columns: 1fr 1fr 1fr; padding: 3px 16px; line-height: 18px; }
+.book { font-size: 13px; padding: 4px 0 8px; }
+.book-row { position: relative; display: grid; grid-template-columns: 1fr 1fr 1fr; padding: 3px 18px; line-height: 18px; }
 .book-row > span { position: relative; text-align: right; }
 .book-row > span:first-of-type { text-align: left; }
 .book-row > i { position: absolute; right: 0; top: 1px; bottom: 1px; opacity: 0.14; }
@@ -448,18 +487,18 @@ td.c.cell-bar .track { right: auto; left: 50%; transform: translateX(-50%); }
 .book-row.bid > span:first-of-type { color: var(--long); }
 .book-row.ask > i { background: var(--short); }
 .book-row.bid > i { background: var(--long); }
-.book-row.head { color: var(--text-3); font-size: 11.5px; padding-bottom: 6px; }
-.book-mid { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 16px; margin: 4px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 14px; font-weight: 500; }
-.book-mid .faint { font-size: 11.5px; font-weight: 400; }
+.book-row.head { color: var(--text-3); font-size: 12px; padding-bottom: 6px; }
+.book-mid { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 18px; margin: 4px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 14px; font-weight: 500; }
+.book-mid .faint { font-size: 12px; font-weight: 400; }
 /* Position calculator */
 .calc-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12px; }
 .calc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin-bottom: 12px; }
 .calc-f { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--text-2); }
 .calc-in { height: 34px; padding: 0 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); outline: none; font-size: 13px; }
 .calc-in:focus { border-color: rgba(162, 164, 255, 0.45); }
-.calc-out { margin: 0 -16px; }
-.calc-note { font-size: 11.5px; margin-top: 10px; }
-.lb-search { height: 30px; width: 240px; max-width: 100%; font-size: 12.5px; }
+.calc-out { margin: 0 -18px; }
+.calc-note { font-size: 12px; margin-top: 10px; }
+.lb-search { height: 30px; width: 240px; max-width: 100%; font-size: 13px; }
 /* Inline pieces inside table cells sit on the cell's 20px first line, centred,
    so a logo, an icon button or a badge never shifts the row's values:
    - a logo-first chip would otherwise align on the logo's bottom edge;
@@ -493,22 +532,22 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 @media (max-width: 860px) { .alerts-grid { grid-template-columns: minmax(0, 1fr); padding: 18px 16px; } }
 .alerts-kicker { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--accent); font-weight: 500; }
 .alerts-kicker svg { width: 14px; height: 14px; }
-.alerts-copy h2 { margin: 8px 0 16px; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.alerts-copy h2 { margin: 8px 0 16px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
 .alerts-features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
 @media (max-width: 640px) { .alerts-features { grid-template-columns: minmax(0, 1fr); } }
 .alerts-f { display: flex; gap: 10px; align-items: flex-start; }
-.alerts-fi { flex: none; width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; font-size: 16px; background: rgba(111, 92, 255, 0.14); box-shadow: inset 0 0 0 1px rgba(143, 130, 255, 0.25); }
+.alerts-fi { flex: none; width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; font-size: 17px; background: rgba(111, 92, 255, 0.14); box-shadow: inset 0 0 0 1px rgba(143, 130, 255, 0.25); }
 .alerts-f b { display: block; font-size: 13px; font-weight: 600; margin-bottom: 2px; }
-.alerts-f span { font-size: 12.5px; color: var(--text-2); line-height: 1.45; }
+.alerts-f span { font-size: 13px; color: var(--text-2); line-height: 1.45; }
 .alerts-cta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 20px; font-size: 12px; }
-.alerts-cta .btn { height: 36px; padding: 0 16px; font-size: 13.5px; }
+.alerts-cta .btn { height: 36px; padding: 0 16px; font-size: 13px; }
 .alerts-demo { display: flex; justify-content: center; padding: 18px; border-radius: 10px; background: linear-gradient(160deg, #17212b, #0e1621); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05); }
 .tg-bubble { position: relative; max-width: 300px; width: 100%; padding: 9px 12px 20px; border-radius: 12px 12px 12px 4px; background: #182533; color: #e9eef3; font-size: 13px; line-height: 1.5; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); }
 .tg-line b { font-weight: 600; }
 .tg-link { color: #6ab3f3; }
 .tg-time { position: absolute; right: 10px; bottom: 5px; font-size: 11px; color: #6d7f8f; }
 
-.risk-foot { flex-wrap: wrap; gap: 6px 16px; font-size: 11.5px; line-height: 1.45; }
+.risk-foot { flex-wrap: wrap; gap: 6px 16px; font-size: 12px; line-height: 1.45; }
 .risk-foot > span:first-child { flex: 1 1 320px; color: var(--text-2); }
 
 /* The live tape's finality time. */
@@ -540,7 +579,7 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .panel-head > div > .seg.sm { margin: -4px 0; }
 /* The volume card's key row: the legend wraps beside the period switch and the
    span, which stay whole on their line. */
-.panel-head.vol-keys { min-height: 0; padding-top: 0; }
+.panel-head.vol-keys { min-height: 40px; padding-top: 0; }
 .vol-keys .legend { flex: 1 1 auto; min-width: 0; }
 .vol-keys .head-right { flex: none; align-items: center; }
 /* The link to the markets and the window switch share one line. */
@@ -576,6 +615,7 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 /* Page-by-page tables (liquidations feed, leaderboard). On phones the count sits
    over the page switch, so the buttons keep their labels on one line. */
 .pager { align-items: center; }
+.panel-foot.pager { min-height: 49px; }
 .pager-ctl { display: inline-flex; align-items: center; gap: 10px; color: var(--text-2); }
 .pager .btn { white-space: nowrap; }
 @media (max-width: 640px) {
@@ -849,6 +889,10 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .alerts-f b { font-weight: 500; }
 /* ========== end page: risk ========== */
 
+/* ========== page: overview (overview.js) ========== */
+/* overview rules */
+/* ========== end page: overview ========== */
+
 /* A second line shown only on phones, where its own column hides. */
 .sub-sm { display: none; }
 
@@ -862,9 +906,11 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
   .t th:last-child, .t td:last-child { padding-right: 16px; }
   .t td .addr .icon-btn { display: none; }
   .t .yr { display: none; }
-  .t .sub-sm { display: block; font-size: 11.5px; }
+  .t .sub-sm { display: block; font-size: 12px; }
 }
 @media (max-width: 380px) { .t th, .t td { padding-left: 6px; padding-right: 6px; } }
+/* The last cell a phone shows keeps the panel's inset, even when hidden cells follow it. */
+@media (max-width: 640px) { .t tr > :nth-last-child(1 of :not(.hide-sm)) { padding-right: 16px; } }
 
 /* Stress test market picker: each market with its logo. */
 .mpick { position: relative; }
@@ -888,7 +934,7 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .kpi-basis, .kpi-note, .t .sub, .t .note, .t .sub-sm, .legend.dots, .legend .lg, .ratio-wrap .lbl, .head-value .hn, .book-row.head, .book-mid .faint, .calc-note, .risk-foot, .seg.sm button, .rank-pill, .side, .co-id span, .co-ls, .co-share, .co-stats > span, .co-mk, .cmp-facts dt, .heat, .cal-days, .cal-months, .t tr.grp td, .tg-time { font-size: 12px; }
 .t .sub, .t .sub-sm { line-height: 16px; }
 .tag, .sub.tags .tag { font-size: 11px; font-weight: 500; }
-.info-tip { width: 14px; height: 14px; font-size: 10px; }
+.info-tip { width: 14px; height: 14px; font-size: 12px; }
 /* Table rhythm: 44px rows, 38px compact, 52px and 48px when every row has a second
    line. Those tables keep to the top, so first lines stay on one line across the
    row; a group label row keeps its own height. */
