@@ -765,7 +765,7 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 @media (max-width: 1100px) { #sm-desc { min-height: 3lh; } }
 @media (max-width: 640px) {
   #sm-desc { min-height: 4lh; }
-  .mv-verb { min-width: 48px; }
+  .mv-verb { min-width: 52px; }
   .mv-ago { display: none; } /* the column is Time, and four columns must fit */
   #moves .t th, #moves .t td { padding-left: 8px; padding-right: 8px; }
   #moves .t th:first-child, #moves .t td:first-child { padding-left: 18px; }
@@ -773,7 +773,10 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
   .sm-ctl, .sm-group { width: 100%; }
   .sm-group { justify-content: space-between; }
 }
-@media (max-width: 380px) { #sm-desc { min-height: 5lh; } }
+@media (max-width: 380px) {
+  #sm-desc { min-height: 5lh; }
+  #moves .t th, #moves .t td { padding-left: 6px; padding-right: 6px; }
+}
 @media (min-width: 861px) {
   .panel-head:has(> .sm-ctl) > div:first-child { flex: 1 1 0; min-width: 0; }
   .sm-ctl { flex: none; flex-wrap: nowrap; gap: 16px; }
