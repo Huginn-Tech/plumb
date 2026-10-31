@@ -856,7 +856,7 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 /* Behaviour: the hour map takes what the row leaves, so the panel has no blank foot. */
 #insights { flex: 1; display: flex; flex-direction: column; }
 #insights > .panel-body { flex: 1; display: flex; }
-#insights .heat { flex: 1; grid-template-rows: repeat(7, minmax(14px, 1fr)) auto; }
+#insights .heat { flex: 1; grid-template-rows: repeat(7, minmax(14px, 40px)) auto; align-content: start; }
 #insights .heat i { height: auto; }
 .wallet-page .g-2 > .panel:has(#insights) { display: flex; flex-direction: column; }
 
@@ -882,10 +882,11 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 }
 @media (max-width: 860px) { .wallet-page .t td .rank-of { display: none; } }
 @media (max-width: 640px) {
-  #trade-list .t th:nth-child(3), #trade-list .t td:nth-child(3), #trade-list .t th:nth-child(7), #trade-list .t td:nth-child(7) { padding-left: 6px; padding-right: 6px; }
-  #trade-list .t th:nth-child(2), #trade-list .t td:nth-child(2) { padding-right: 6px; }
-  #trade-list .t th:nth-child(8), #trade-list .t td:nth-child(8) { padding-left: 6px; }
+  #trade-list .t th:nth-child(3), #trade-list .t td:nth-child(3), #trade-list .t th:nth-child(7), #trade-list .t td:nth-child(7) { padding-left: 4px; padding-right: 4px; }
+  #trade-list .t th:nth-child(2), #trade-list .t td:nth-child(2) { padding-left: 16px; padding-right: 6px; }
+  #trade-list .t th:nth-child(8), #trade-list .t td:nth-child(8) { padding-left: 4px; }
 }
+@media (max-width: 380px) { #trade-list .t th:nth-child(2), #trade-list .t td:nth-child(2) { padding-left: 12px; padding-right: 2px; } }
 .w-fail { min-height: 240px; display: grid; }
 /* ========== end page: traders ========== */
 
