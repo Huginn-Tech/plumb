@@ -2,8 +2,8 @@
 // next to the live tape, a grid of trend charts, the latest liquidations and
 // flows, and market share.
 import { get, stream } from '../api.js';
-import { usd, compact, int, price, pct, share, num, esc, signClass, timeOnly, ago, duration } from '../format.js';
-import { kpi, keepDots, infoTip, seg, table, mkt, sideTag, addr, pnl, tradeAction, chartTools, skRows, skKpis, skChart, empty, assignColors, colorOf, hasColor, logo, ICON, OTHER_HEX, SLOT_HEX, mergeByAsset, hold, morph, panelError, keepTrying, fitRows } from '../ui.js';
+import { usd, usdShort, usdFull, compact, int, price, dpOf, pct, num, esc, signClass, timeOnly, dateTime, ago, duration } from '../format.js';
+import { kpi, keepDots, infoTip, seg, table, mkt, sideTag, addr, pnl, tradeAction, DASH, chartTools, skRows, skKpis, skChart, empty, assignColors, colorOf, hasColor, logo, ICON, OTHER_HEX, SLOT_HEX, mergeByAsset, hold, morph, panelError, keepTrying, fitRows } from '../ui.js';
 import { sparkline, stackedBars, lineChart, signedBars, twoSided, toggleSeries, dropZoom, COLORS, CUMULATIVE } from '../charts.js';
 
 const WINDOWS = [['24h', '24H'], ['7d', '7D'], ['30d', '30D'], ['all', 'All']];
@@ -20,6 +20,10 @@ const LIST_ROWS = 8;
 const windowOf = q => (WINDOWS.some(([v]) => v === q.get('window')) ? q.get('window') : DEFAULT_WINDOW);
 const savedMinSize = () => { try { const v = localStorage.getItem('ps.minsize'); return MIN_SIZES.some(([x]) => x === v) ? v : '100'; } catch { return '100'; } };
 // What the API says goes unprinted (panelError has its own words); a bug in this file does not.
+// A table or note amount: the short form, with the exact figure as its note.
+const amt = (v, opts) => (num(v) === null ? DASH : `<span class="amt" title="${esc(usdFull(v))}">${usdShort(v, opts)}</span>`);
+// How long ago, with the exact time as its note.
+const when = ts => `<span class="muted" title="${esc(dateTime(ts))} UTC">${ago(ts)}</span>`;
 const logBug = e => { if (e?.status === undefined && e?.code === undefined) console.error(e); };
 
 export function mount(el, { query, setQuery }) {
@@ -59,32 +63,32 @@ export function mount(el, { query, setQuery }) {
       <div class="kpis keep-delta" id="kpis">${skKpis(6, { spark: true, lines: 2 })}</div>
       <div class="grid g-main">
         <section class="panel">
-          <div class="panel-head"><div><h2>Trading volume</h2><div class="desc">Maker-fill notional by market; line: running total</div></div><div class="head-right vol-head">${chartTools('main-chart', 'volume')}<a class="meta" href="/markets">Market details →</a><span id="vwin" class="trend-win">${segSm('vw', WINDOWS, vw)}</span></div></div>
+          <div class="panel-head"><div><h2>Trading volume</h2><div class="desc">${keepDots('Traded notional by market · line: running total')}</div></div><div class="head-right vol-head">${chartTools('main-chart', 'volume')}<a class="meta" href="/markets">Market details →</a><span id="vwin" class="trend-win">${segSm('vw', WINDOWS, vw)}</span></div></div>
           <div class="panel-head vol-keys"><div class="legend toggles" id="legend"></div><span class="head-right"><span id="bucket"></span><span class="meta" id="chart-meta"></span></span></div>
           <div class="panel-body"><div class="chart" id="main-chart">${skChart()}</div></div>
         </section>
         <section class="panel fill">
           <div class="panel-head"><h2>Live trades</h2><div id="minsize">${segSm('min', MIN_SIZES, minSize)}</div></div>
           <div class="panel-body flush scroll" id="tape">${skRows(11, 38, 34)}</div>
-          <div class="panel-foot ov-tape-foot"><span id="tape-meta">Finalized blocks · aggressor side · UTC</span><span id="tape-count"></span></div>
+          <div class="panel-foot ov-tape-foot"><span id="tape-meta">${keepDots('Finalized blocks · taker side · UTC')}</span><span id="tape-count"></span></div>
         </section>
       </div>
-      <div class="section-label">Trends</div>
+      <div class="section-label">Trends <span class="section-note">Each chart has its own period</span></div>
       <div class="grid g-2">
         ${panel('oi', 'Open interest', 'Value of open positions, one side only (longs equal shorts); the chart uses last trade prices')}
         ${panel('tvl', 'TVL', 'Collateral in the exchange contract')}
-        ${panel('flows', 'Deposits and withdrawals', 'Deposits (up) and withdrawals (down) per period; the line is the net')}
+        ${panel('flows', 'Deposits and withdrawals', 'Deposits (up) and withdrawals (down) per period; the line is the net flow')}
         ${panel('traders', 'Active traders', 'Accounts that traded in each period, split into returning and first-time (first trade ever)')}
         ${panel('fees', 'Fees', 'Trading fees before rebates, split between the protocol and the insurance fund', `<div id="fees-mode">${segSm('feesv', FEE_VIEWS, feeView)}</div>`)}
-        ${panel('liq', 'Liquidations', 'Value of positions liquidated, by market; the line is the running total')}
+        ${panel('liq', 'Liquidated', 'Notional liquidated per period, by market; the line is the running total')}
         ${panel('tpnl', 'Trader PnL', 'Realized PnL of all traders per period, funding included, before fees. The after-fees figure subtracts trading and liquidation fees.')}
         ${panel('taker', 'Taker flow', 'Volume bought (up) and sold (down) by takers per period; the line is net buying')}
       </div>
       <div class="section-label">Activity</div>
       <div class="grid g-3 aligned">
         <section class="panel"><div class="panel-head"><h2>Latest liquidations</h2><a class="meta" href="/liquidations">View all →</a></div><div class="panel-body flush" id="liqs">${skRows(LIST_ROWS, 38, 34)}</div></section>
-        <section class="panel"><div class="panel-head"><h2>Deposits and withdrawals</h2><div id="flowview">${segSm('flowv', FLOW_VIEWS, flowView)}</div></div><div class="panel-body flush" id="flowlist">${skRows(LIST_ROWS, 38, 34)}</div></section>
-        <section class="panel fill"><div class="panel-head"><h2>Across windows</h2><span class="meta">Exchange totals</span></div><div class="panel-body flush fill-table" id="windows">${skRows(4, 76, 34, 38)}</div></section>
+        <section class="panel"><div class="panel-head"><h2>Wallet flows</h2><div id="flowview">${segSm('flowv', FLOW_VIEWS, flowView)}</div></div><div class="panel-body flush" id="flowlist">${skRows(LIST_ROWS, 38, 34)}</div></section>
+        <section class="panel fill"><div class="panel-head"><h2>By period</h2><span class="meta">Exchange totals</span></div><div class="panel-body flush fill-table" id="windows">${skRows(4, 76, 34, 38)}</div></section>
       </div>
       <div class="section-label">Market share</div>
       <div class="grid g-2" id="landscape-grid">
@@ -185,15 +189,15 @@ export function mount(el, { query, setQuery }) {
     const ch = v => (win === 'all' || data.meta.previous_complete === false ? undefined : v);
     const partial = cov && !cov.complete ? ' <span class="tag warn" title="History for this window is still being indexed">partial</span>' : '';
     // Window totals compare with the window before; open interest and TVL show their change within the window.
-    const vsPrev = { basis: 'vs prev', basisTitle: `Compared with the previous ${wl}` }, within = { basis: `in ${wl}`, basisTitle: `Change over the last ${wl}` };
+    const vsPrev = { basis: `vs prev ${wl}`, basisTitle: `Compared with the previous ${wl}` }, within = { basis: `in ${wl}`, basisTitle: `Change over the last ${wl}` };
     morph($('kpis'), [
       kpi({ label: `Volume · ${wl}`, value: usd(h.volume.value), delta: ch(h.volume.change_pct), ...vsPrev, note: `${int(data.markets.reduce((a, m) => a + (m.fills ?? 0), 0))} trades${partial}`, spark: 'sp-vol' }),
       kpi({ label: 'Open interest', value: usd(c?.open_interest), delta: seriesChange('open_interest'), ...within, note: c ? `${int(c.positions)} open positions` : '', spark: 'sp-oi' }),
-      kpi({ label: 'TVL', value: usd(c?.tvl), delta: seriesChange('tvl'), ...within, note: `${usd(h.net_flow.value, { sign: true })} net flow · ${wl}`, spark: 'sp-tvl' }),
-      kpi({ label: `Fees · ${wl}`, value: usd(h.fees.value), delta: ch(h.fees.change_pct), ...vsPrev, note: h.protocol_revenue ? `<span data-tip="The protocol's share of fees (${usd(h.protocol_fees?.value)}) plus its share of liquidations (${usd(h.revenue?.protocol?.liquidations)})">${usd(h.protocol_revenue.value)} protocol revenue</span>` : '', spark: 'sp-fees' }),
+      kpi({ label: 'TVL', value: usd(c?.tvl), delta: seriesChange('tvl'), ...within, note: `${amt(h.net_flow.value, { sign: true })} net flow · ${wl}`, spark: 'sp-tvl' }),
+      kpi({ label: `Fees · ${wl}`, value: usd(h.fees.value), delta: ch(h.fees.change_pct), ...vsPrev, note: h.protocol_revenue ? `<span data-tip="The protocol's share of fees (${usdFull(h.protocol_fees?.value)}) plus its share of liquidations (${usdFull(h.revenue?.protocol?.liquidations)})">${usdShort(h.protocol_revenue.value)} protocol revenue</span>` : '', spark: 'sp-fees' }),
       act ? kpi({ label: 'Active traders · 30d', value: int(act.p.headline.traders.value), note: `${int(act.p.headline.new_accounts.value)} new accounts`, spark: 'sp-tr' })
         : kpi({ label: `Active traders · ${wl}`, value: int(h.traders.value), delta: ch(h.traders.change_pct), ...vsPrev, note: `${int(h.new_accounts.value)} new accounts`, spark: 'sp-tr' }),
-      kpi({ label: `Liquidations · ${wl}`, value: usd(h.liquidated.value), delta: ch(h.liquidated.change_pct), ...vsPrev, invert: true, note: `${int(h.liquidations.value)} liquidations`, spark: 'sp-liq' })
+      kpi({ label: `Liquidated · ${wl}`, value: usd(h.liquidated.value), delta: ch(h.liquidated.change_pct), ...vsPrev, invert: true, note: `${int(h.liquidations.value)} ${num(h.liquidations.value) === 1 ? 'liquidation' : 'liquidations'}`, spark: 'sp-liq' })
     ].join(''));
     spark('sp-vol', pts.map(p => num(p.volume)));
     spark('sp-oi', pts.map(p => num(p.open_interest)));
@@ -246,7 +250,7 @@ export function mount(el, { query, setQuery }) {
     const sr = d.s, pts = sr.points, times = sr.times, b = sr.meta.bucket_seconds;
     const list = feeView === 'market' ? byMarket('fees', sr) : [{ name: 'Protocol', color: SLOT_HEX[0], data: pts.map(p => num(p.protocol_fees)) }, { name: 'Insurance fund', color: SLOT_HEX[2], data: pts.map(p => num(p.insurance_fees)) }].filter(x => x.data.some(v => v > 0));
     legendOf('fees', list);
-    if (list.length) stackedBars(node, { times, series: list, bucketSeconds: b }); else node.innerHTML = empty('No fees in this window');
+    if (list.length) stackedBars(node, { times, series: list, bucketSeconds: b }); else node.innerHTML = empty('No fees in this period');
   }
   // Each trend panel: its window's totals (header) and series (chart).
   const trendOf = {};
@@ -282,9 +286,9 @@ export function mount(el, { query, setQuery }) {
         if (cumulative) lineChart(node, { times, series: [{ name: 'TVL', color: SLOT_HEX[0], data: pts.map(p => num(p.tvl)) }], bucketSeconds: b }); else node.innerHTML = empty(historyNote());
         break;
       case 'flows':
-        headValue('flows', pnl(h.net_flow.value), `${usd(h.deposits.value)} in · ${usd(h.withdrawals.value)} out · ${winLabel(win)}`);
-        legendOf('flows', [{ name: 'Deposits', color: COLORS.long }, { name: 'Withdrawals', color: COLORS.short }, { name: 'Net deposits', ...NET }]); // the chart's own names, as in its tooltip
-        twoSided(node, { times, bucketSeconds: b, up: { name: 'Deposits', data: pts.map(p => p.deposits) }, down: { name: 'Withdrawals', data: pts.map(p => p.withdrawals) }, net: 'Net deposits' });
+        headValue('flows', usd(h.net_flow.value, { sign: true }), `${amt(h.deposits.value)} in · ${amt(h.withdrawals.value)} out · ${winLabel(win)}`);
+        legendOf('flows', [{ name: 'Deposits', color: COLORS.long }, { name: 'Withdrawals', color: COLORS.short }, { name: 'Net flow', ...NET }]); // the chart's own names, as in its tooltip
+        twoSided(node, { times, bucketSeconds: b, up: { name: 'Deposits', data: pts.map(p => p.deposits) }, down: { name: 'Withdrawals', data: pts.map(p => p.withdrawals) }, net: 'Net flow' });
         break;
       case 'traders':
         {
@@ -302,15 +306,15 @@ export function mount(el, { query, setQuery }) {
         break;
       case 'fees':
         // Payouts from the protocol to trader accounts show on hover over its share.
-        const paid = num(h.protocol_payouts?.value) > 0 ? ` data-tip="${usd(h.protocol_payouts.value)} paid from the protocol to trader accounts"` : '';
-        headValue('fees', usd(h.fees.value), `<span${paid}>${usd(h.protocol_fees.value)} protocol</span> · ${usd(h.insurance_fees.value)} insurance · ${winLabel(win)}`);
+        const paid = num(h.protocol_payouts?.value) > 0 ? `<span data-tip="${usdFull(h.protocol_payouts.value)} paid from the protocol to trader accounts">${usdShort(h.protocol_fees.value)} protocol</span>` : `${amt(h.protocol_fees.value)} protocol`;
+        headValue('fees', usd(h.fees.value), `${paid} · ${amt(h.insurance_fees.value)} insurance · ${winLabel(win)}`);
         renderFees();
         break;
       case 'liq': {
         headValue('liq', usd(h.liquidated.value), `${int(h.liquidations.value)} liquidations · ${winLabel(win)}`);
         const list = byMarket('liquidated', sr);
         legendOf('liq', list.length ? [...list, { name: 'Cumulative', ...NET }] : []);
-        if (list.length) stackedBars(node, { times, series: list, bucketSeconds: b, cumulative: true }); else node.innerHTML = empty('No liquidations in this window');
+        if (list.length) stackedBars(node, { times, series: list, bucketSeconds: b, cumulative: true }); else node.innerHTML = empty('No liquidations in this period');
         break;
       }
       case 'tpnl': {
@@ -319,13 +323,13 @@ export function mount(el, { query, setQuery }) {
         const total = num(h.realized_pnl?.value ?? h.realized_pnl) ?? 0;
         const value = pnl(total), line = () => `${winLabel(win)}${afterFees?.win === win ? ` · after fees ${afterFees.text}` : ''}`;
         headValue('tpnl', value, line());
-        get(`traders/summary?window=${win}`, { maxAge: 20000 }).then(t => { if (!alive || !t || trendOf.tpnl?.win !== win) return; afterFees = { win, text: usd(t.net_pnl, { sign: true }) }; headValue('tpnl', value, line()); }).catch(() => {});
+        get(`traders/summary?window=${win}`, { maxAge: 20000 }).then(t => { if (!alive || !t || trendOf.tpnl?.win !== win) return; afterFees = { win, text: amt(t.net_pnl, { sign: true }) }; headValue('tpnl', value, line()); }).catch(() => {});
         signedBars(node, { times, values: pts.map(p => num(p.realized_pnl)), bucketSeconds: b, name: 'Trader realized PnL' });
         break;
       }
       case 'taker': {
         const buys = d.p.markets.reduce((a, m) => a + (num(m.taker_buy) ?? 0), 0), sells = d.p.markets.reduce((a, m) => a + (num(m.taker_sell) ?? 0), 0);
-        headValue('taker', buys + sells ? `${pct(buys / (buys + sells) * 100, { digits: 1 })} buys` : '—', `${usd(buys)} bought · ${usd(sells)} sold · ${winLabel(win)}`);
+        headValue('taker', buys + sells ? `${pct(buys / (buys + sells) * 100, { digits: 1 })} buys` : '—', `${amt(buys)} bought · ${amt(sells)} sold · ${winLabel(win)}`);
         legendOf('taker', [{ name: 'Taker buys', color: COLORS.long }, { name: 'Taker sells', color: COLORS.short }, { name: 'Net taker buying', ...NET }]);
         twoSided(node, { times, bucketSeconds: b, up: { name: 'Taker buys', data: pts.map(p => p.taker_buy) }, down: { name: 'Taker sells', data: pts.map(p => p.taker_sell) }, net: 'Net taker buying' });
         break;
@@ -352,20 +356,20 @@ export function mount(el, { query, setQuery }) {
     // Until the first answer the skeleton or the error stays: no rows yet says nothing about the market.
     if (!rows.length) { if (tapeLoaded) morph($('tape'), empty(tape.length ? 'No trades of this size yet' : 'Waiting for trades')); return; }
     morph($('tape'), table({ id: 'tape', compact: true, columns: [
-      { key: 't', label: 'Time', render: r => `<span class="muted num">${timeOnly(r.ts)}</span>` },
+      { key: 't', label: 'Time (UTC)', render: r => `<span class="muted num">${timeOnly(r.ts)}</span>` },
       { key: 'm', label: 'Market', render: r => mkt(r.market, r.symbol) },
-      { key: 's', label: 'Action', render: tradeAction },
-      { key: 'p', label: 'Price', phone: false, n: true, render: r => price(r.price) },
-      { key: 'v', label: 'Value', n: true, render: r => usd(r.notional) }
+      { key: 's', label: 'Action', tip: 'What the taker did. Green: bought. Red: sold.', render: tradeAction },
+      { key: 'p', label: 'Price', phone: false, n: true, render: r => price(r.price, dpOf(r.price)) },
+      { key: 'v', label: 'Notional', n: true, render: r => amt(r.notional) }
     ], rows: rows.slice(0, 60), rowAttrs: r => `class="link ${r.fresh ? 'flash' : ''} ${r.proposed ? 'proposed' : ''}" data-href="/wallet/${esc(r.address || r.account)}" ${r.proposed ? `title="${stageTitle(r)}"` : ''}` }));
     for (const r of tape) r.fresh = false;
   }
   function renderLiqs(l) {
     morph($('liqs'), l.rows.length ? table({ id: 'liqs', compact: true, columns: [
       { key: 'm', label: 'Market', render: r => mkt(r.market, r.symbol) },
-      { key: 's', label: 'Position', render: r => sideTag(r.side) },
-      { key: 'v', label: 'Value', n: true, render: r => usd(r.notional) },
-      { key: 't', label: 'When', n: true, render: r => `<span class="muted">${ago(r.ts)}</span>` }
+      { key: 's', label: 'Side', render: r => sideTag(r.side) },
+      { key: 'v', label: 'Notional', n: true, render: r => amt(r.notional) },
+      { key: 't', label: 'Time', n: true, render: r => when(r.ts) }
     ], rows: l.rows.slice(0, LIST_ROWS), rowAttrs: r => `class="link" data-href="/wallet/${esc(r.address || r.account)}"` }) : empty('No liquidations yet'));
   }
   // Latest movements, or the window's largest depositors / withdrawers with their net.
@@ -379,25 +383,25 @@ export function mount(el, { query, setQuery }) {
       morph(node, rows.length ? table({ id: 'flowlist', compact: true, columns: [
         { key: 'k', label: 'Type', render: r => `<span class="${r.kind === 'deposit' ? 'pos' : 'neg'}">${r.kind === 'deposit' ? 'Deposit' : 'Withdrawal'}</span>` },
         { key: 'a', label: 'Wallet', render: r => addr(r.address, r.account, { star: false }) },
-        { key: 'v', label: 'Amount', n: true, render: r => usd(r.amount) },
-        { key: 't', label: 'When', phone: false, n: true, render: r => `<span class="muted">${ago(r.ts)}</span>` }
+        { key: 'v', label: 'Amount', n: true, render: r => amt(r.amount) },
+        { key: 't', label: 'Time', phone: false, n: true, render: r => when(r.ts) }
       ], rows, rowAttrs: link }) : empty('No recent deposits or withdrawals'));
       return;
     }
     const inbound = flowView === 'in', rows = ((inbound ? f.top_depositors : f.top_withdrawers) ?? []).slice(0, LIST_ROWS);
     morph(node, rows.length ? table({ id: 'flowlist', compact: true, columns: [
       { key: 'a', label: 'Wallet', render: r => addr(r.address, r.account, { star: false }) },
-      { key: 'v', label: inbound ? 'Deposited' : 'Withdrew', n: true, render: r => usd(inbound ? r.deposits : r.withdrawals) },
-      { key: 'n', label: 'Net', n: true, render: r => pnl(r.net) }
-    ], rows, rowAttrs: link }) : empty(`No ${inbound ? 'deposits' : 'withdrawals'} in this window`));
+      { key: 'v', label: inbound ? 'Deposited' : 'Withdrew', n: true, render: r => amt(inbound ? r.deposits : r.withdrawals) },
+      { key: 'n', label: 'Net flow', n: true, render: r => amt(r.net, { sign: true }) }
+    ], rows, rowAttrs: link }) : empty(`No ${inbound ? 'deposits' : 'withdrawals'} in this period`));
   }
   function renderWindows() {
     const ws = data.windows;
     const rows = [['24h', '24 hours'], ['7d', '7 days'], ['30d', '30 days'], ['all', 'All-time']].map(([k, label]) => ({ k, label, ...(ws[k] ?? {}) }));
     morph($('windows'), table({ id: 'win', compact: true, columns: [
-      { key: 'label', label: 'Window', render: r => `${r.label}${r.k === 'all' && backfill && !backfill.complete ? ' <span class="tag warn" title="History is still being indexed">partial</span>' : ''}${r.k === dataWin ? ' <span class="tag accent">shown</span>' : ''}` },
-      { key: 'volume', label: 'Volume', n: true, render: r => usd(r.volume) },
-      { key: 'fees', label: 'Fees', n: true, render: r => usd(r.fees) },
+      { key: 'label', label: 'Period', render: r => `${r.label}${r.k === 'all' && backfill && !backfill.complete ? ' <span class="tag warn" title="History is still being indexed">partial</span>' : ''}${r.k === dataWin ? ' <span class="tag accent">shown</span>' : ''}<div class="sub">${int(r.trades)} trades</div>` },
+      { key: 'volume', label: 'Volume', n: true, render: r => amt(r.volume) },
+      { key: 'fees', label: 'Fees', n: true, render: r => amt(r.fees) },
       { key: 'traders', label: 'Traders', n: true, render: r => int(r.traders) }
     ], rows, rowAttrs: r => `class="link" data-href="/?window=${r.k}"` }));
   }
@@ -416,19 +420,19 @@ export function mount(el, { query, setQuery }) {
     if (!alive || ask !== lsAsk) return;
     lsLoaded = true;
     const src = `<a href="${esc(l.source.url)}" target="_blank" rel="noopener noreferrer">${esc(l.source.name)}</a>, ${ago(Math.round(l.fetched_at / 1000))}`;
-    const bar = (v, share) => `${usd(v)}<span class="track"><i style="width:${Math.max(2, Math.min(100, share ?? 0))}%"></i></span>`;
+    const bar = (v, share) => `${amt(v)}<span class="track"><i style="width:${Math.max(2, Math.min(100, share ?? 0))}%"></i></span>`;
     const name = r => (r.self || r.name === 'Perpl' ? `<span class="mkt"><img class="tk" src="/img/venues/perpl.png" alt="" width="16" height="16"><b>${esc(r.name)}</b></span>` : esc(r.name));
     // The five largest venues give the scale; Perpl's own row follows them.
     const top = l.top.slice(0, 5);
     if (l.perpl && l.perpl.rank > top.length) top.push({ rank: l.perpl.rank, name: 'Perpl', oi: l.perpl.oi, share_pct: l.perpl.share_pct });
-    morph($('ls-meta'), l.perpl ? `Perpl #${int(l.perpl.rank)} of ${int(l.venues)} · ${pct(l.perpl.share_pct, { digits: 2 })} · ${src}` : src);
+    morph($('ls-meta'), keepDots(l.perpl ? `Perpl #${int(l.perpl.rank)} of ${int(l.venues)} · ${pct(l.perpl.share_pct, { digits: 2 })} · ${src}` : src));
     morph($('ls-all'), table({ id: 'ls-all', compact: true, columns: [
       { key: 'r', label: '#', render: r => `<span class="rank">${r.rank}</span>` },
       { key: 'n', label: 'Venue', render: name },
       { key: 'o', label: 'Open interest', n: true, center: true, cls: 'cell-bar', render: r => bar(r.oi, r.share_pct / (l.top[0]?.share_pct || 1) * 100) },
       { key: 's', label: 'Share', n: true, render: r => `<span class="muted">${pct(r.share_pct, { digits: 2 })}</span>` }
     ], rows: top, rowAttrs: r => (r.name === 'Perpl' ? 'class="hl"' : '') }));
-    morph($('ls-chain-meta'), l.perpl?.share_of_chain_pct !== null && l.perpl ? `Perpl ${pct(l.perpl.share_of_chain_pct, { digits: 1 })} of ${esc(l.chain.name)} · ${src}` : src);
+    morph($('ls-chain-meta'), keepDots(l.perpl?.share_of_chain_pct !== null && l.perpl ? `Perpl ${pct(l.perpl.share_of_chain_pct, { digits: 1 })} of ${esc(l.chain.name)} · ${src}` : src));
     morph($('ls-chain'), table({ id: 'ls-chain', compact: true, emptyText: 'No venues listed', columns: [
       { key: 'n', label: 'Venue', render: name },
       { key: 'o', label: 'Open interest', n: true, center: true, cls: 'cell-bar', render: r => bar(r.oi, r.share_pct) },
@@ -452,7 +456,7 @@ export function mount(el, { query, setQuery }) {
     if (s.stage === 'voted') { for (const r of tape) if (r.proposed && Number(r.block) === s.block) r.votedMs = s.ms; return; }
     if (s.stage === 'finalized') { finalMs.push(s.ms); if (finalMs.length > 50) finalMs.shift(); renderSpeed(); }
   }));
-  off.push(stream.on('proposed', p => { for (const r of p.trades) if (!tape.some(x => x.tx === r.tx)) tape.unshift({ ...r, proposed: true, fresh: true }); tape.length = Math.min(tape.length, 400); if (!finalMs.length) morph($('tape-meta'), 'Proposed + finalized blocks · UTC'); renderTape(); }));
+  off.push(stream.on('proposed', p => { for (const r of p.trades) if (!tape.some(x => x.tx === r.tx)) tape.unshift({ ...r, proposed: true, fresh: true }); tape.length = Math.min(tape.length, 400); if (!finalMs.length) morph($('tape-meta'), keepDots('Proposed + finalized blocks · taker side · UTC')); renderTape(); }));
   off.push(stream.on('backfill', p => {
     const finished = backfill && !backfill.complete && p.complete;
     backfill = p;
