@@ -1,8 +1,8 @@
 // Shell: router, header (search, live status), event delegation, the
 // server-sent event stream and the indexing banner.
-import { get, stream } from './api.js';
+import { get, stream, openStale, closeStale } from './api.js';
 import { esc, short, int, dateTime, price, pct, signClass } from './format.js';
-import { watch, toast, ICON, assignColors, download, logo, setAlertsBot, go } from './ui.js';
+import { watch, toast, ICON, assignColors, download, logo, setAlertsBot, go, panelError } from './ui.js';
 import { disposeAll, chartCsv, chartPng } from './charts.js';
 
 const routes = [
@@ -32,40 +32,88 @@ export function navigate(path, query = null) {
   const qs = query ? new URLSearchParams(Object.entries(query).filter(([, v]) => v !== null && v !== undefined && v !== '')).toString() : '';
   go(`${path}${qs ? `?${qs}` : ''}`);
 }
-export function setQuery(patch) {
+const withQuery = patch => {
   const { path, query } = parseLocation();
   for (const [k, v] of Object.entries(patch)) { if (v === null || v === undefined || v === '') query.delete(k); else query.set(k, v); }
   const qs = query.toString();
-  history.replaceState(null, '', `${path}${qs ? `?${qs}` : ''}`);
+  return `${path}${qs ? `?${qs}` : ''}`;
+};
+// While the next page's module loads the old view is still on screen, and the
+// URL is no longer its own: anything it writes there is dropped.
+let leaving = false;
+export function setQuery(patch) {
+  if (leaving) return;
+  history.replaceState(history.state, '', withQuery(patch));
   route(true);
 }
+// Writes a view's own state (pager, sort, open cohort) into the URL without routing,
+// so Back and a shared link find it. The view has already drawn what it records.
+export function keepQuery(patch) {
+  if (leaving) return;
+  history.replaceState(history.state, '', withQuery(patch));
+  shown = location.pathname + location.search;
+}
+
+// Back returns the reader to where they were. A page still filling in takes that
+// place once it is tall enough, unless the reader has moved first.
+const RESTORE_MS = 6000, MOVES = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
+function restoreScroll(y, nav) {
+  const from = performance.now();
+  let moved = false;
+  const stop = () => { moved = true; };
+  const done = () => MOVES.forEach(type => removeEventListener(type, stop, true));
+  MOVES.forEach(type => addEventListener(type, stop, { capture: true, passive: true }));
+  const step = () => {
+    if (moved || nav !== navigation) { done(); return; }
+    if (document.documentElement.scrollHeight - innerHeight < y && performance.now() - from < RESTORE_MS) { requestAnimationFrame(step); return; }
+    window.scrollTo({ top: y }); done();
+  };
+  step();
+}
+
+function leavePage() { current?.instance?.destroy?.(); current = null; disposeAll(); }
+const pageFailed = error => { console.error(error); leavePage(); leaving = false; view.innerHTML = ''; panelError(view, 'Could not load this page.', () => location.reload()); };
 
 // Each navigation takes a number; a view module that loads after a newer
-// navigation started is not mounted.
-let navigation = 0;
-async function route(queryOnly = false) {
+// navigation started is not mounted. y: the scroll position to go back to.
+let navigation = 0, shown = null;
+// Views with a refresh() may open on cached answers: only they can bring them up to date.
+const refreshable = new WeakSet();
+async function route(queryOnly = false, y = 0) {
   const nav = ++navigation;
   const { path, query } = parseLocation();
   shown = location.pathname + location.search;
   const hit = routes.find(([re]) => re.test(path));
   document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === (path.match(/^\/[a-z]*/)?.[0] ?? '/') || (path === '/' && a.dataset.nav === 'overview') || ((path.startsWith('/wallet') || path.startsWith('/compare')) && a.dataset.nav === 'traders') || (path.startsWith('/markets') && a.dataset.nav === 'markets') || (path.startsWith('/watchlist') && a.dataset.nav === 'alerts')));
-  if (!hit) { view.innerHTML = '<div class="empty-state">Page not found. <a href="/">Back to overview</a></div>'; return; }
+  if (!hit) { leavePage(); leaving = false; view.innerHTML = '<div class="page-head"><div><h1>Page not found</h1></div></div><div class="empty-state"><a href="/">Back to overview</a></div>'; window.scrollTo({ top: 0 }); return; }
   const params = path.match(hit[0]).slice(1);
   const key = `${hit[0]}:${params.join('/')}`;
   if (queryOnly && current?.key === key && current.instance?.update) { current.instance.update(query); return; }
-  current?.instance?.destroy?.();
-  current = null;
-  disposeAll();
-  const mod = await hit[1]();
-  if (nav !== navigation) return;
-  view.innerHTML = '';
-  window.scrollTo({ top: 0 });
-  const instance = mod.mount(view, { params, query, navigate, setQuery });
-  current = { key, mod, instance };
+  leaving = true; // the old page stays whole, charts included, until the next one can take over
+  try {
+    const mod = await hit[1]();
+    if (nav !== navigation) return;
+    leavePage();
+    leaving = false;
+    view.innerHTML = '';
+    window.scrollTo({ top: 0 });
+    let instance = null;
+    if (refreshable.has(mod)) openStale();
+    // Cached answers render in microtasks, so the page is at full height by the next
+    // task. Set before mount: a mount that throws must still close the window.
+    setTimeout(() => { const used = closeStale(); if (nav !== navigation) return; if (y) restoreScroll(y, nav); if (used) instance?.refresh?.({ stale: true }); }, 0);
+    instance = mod.mount(view, { params, query, navigate, setQuery, keepQuery });
+    current = { key, mod, instance };
+    if (instance?.refresh) refreshable.add(mod);
+    // Keyboard readers go on from the new page, not from the link they left. Typing stays put.
+    if (nav > 1 && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) view.focus({ preventScroll: true });
+  } catch (error) { if (nav === navigation) pageFailed(error); }
 }
 // Back and forward, and go(); a change of the #fragment alone is not a new page.
-let shown = null;
-window.addEventListener('popstate', () => { if (location.pathname + location.search !== shown) route(false); });
+history.scrollRestoration = 'manual';
+window.addEventListener('popstate', e => { if (location.pathname + location.search !== shown) route(false, e.state?.y ?? 0); });
+// A reload, or a return from another site, also comes back to the same place.
+window.addEventListener('pagehide', () => history.replaceState({ ...history.state, y: Math.round(scrollY) }, ''));
 
 // --- delegated interactions -------------------------------------------------------------
 document.addEventListener('click', async event => {
@@ -180,6 +228,6 @@ poll(); setInterval(poll, 30000);
 stream.connect();
 // The first view renders at once (colours are seeded in ui.js); the market list
 // then confirms each market's colour for the views that follow.
-route();
+route(false, history.state?.y ?? 0);
 get('protocol?window=all', { maxAge: 60000 }).then(p => assignColors([...p.markets].sort((a, b) => Number(b.volume) - Number(a.volume)).map(m => ({ id: m.id, symbol: m.symbol })))).catch(() => {});
 export { lastBlock, dateTime };

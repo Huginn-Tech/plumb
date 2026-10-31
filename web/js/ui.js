@@ -115,8 +115,9 @@ export { infoTip as tip };
 export function kpi({ label, value, delta = undefined, invert = false, basis = null, basisTitle = null, note = '', spark = null, tip = null, cls = '' }) {
   return `<div class="kpi ${cls}"><div class="kpi-label">${keepDots(esc(label), infoTip(tip, label))}</div><div class="kpi-value">${value}</div><div class="kpi-row">${delta === undefined ? '' : `${deltaHtml(delta, invert, basisTitle)}${basis ? `<span class="kpi-basis">${esc(basis)}</span>` : ''}`}<span class="kpi-note">${keepDots(note)}</span></div>${spark ? `<div class="spark" id="${esc(spark)}"></div>` : ''}</div>`;
 }
-// Moves to a page of the dashboard; the router in app.js answers the popstate.
-export const go = url => { history.pushState(null, '', url); dispatchEvent(new PopStateEvent('popstate')); };
+// Moves to a page of the dashboard; the router in app.js answers the popstate. The
+// page being left keeps its scroll position in its history entry, for Back.
+export const go = url => { history.replaceState({ ...history.state, y: Math.round(scrollY) }, ''); history.pushState(null, '', url); dispatchEvent(new PopStateEvent('popstate')); };
 export const seg = (name, options, active) => `<div class="seg" role="group">${options.map(([v, label]) => `<button data-seg="${esc(name)}" data-v="${esc(v)}" class="${String(v) === String(active) ? 'on' : ''}" aria-pressed="${String(v) === String(active)}">${esc(label)}</button>`).join('')}</div>`;
 export const tabs = (name, options, active) => `<div class="tabs" role="tablist">${options.map(([v, label]) => `<button role="tab" data-tab="${esc(name)}" data-v="${esc(v)}" class="${v === active ? 'on' : ''}" aria-selected="${v === active}">${esc(label)}</button>`).join('')}</div>`;
 export function ratio(long, short) {
