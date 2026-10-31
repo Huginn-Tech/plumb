@@ -143,7 +143,7 @@ export function mount(el, { query, setQuery, keepQuery }) {
   const holdStress = () => { const a = hold($('stress')), b = hold($('hit')); stressHeld = () => { a(); b(); }; };
   async function stress() {
     const seq = ++stressSeq, id = marketId, at = move, key = `${id}:${at}`;
-    if (!id) { drawMove(); morph($('stress'), empty('No open positions')); morph($('hit'), empty('No open positions')); morph($('hit-meta'), ''); shown = key; stressDone(); return; }
+    if (!id) { noMark = true; drawMove(); morph($('stress'), empty('No open positions')); morph($('hit'), empty('No open positions')); morph($('hit-meta'), ''); shown = key; stressDone(); return; }
     if (at === 0) { drawMove(); morph($('stress'), empty('Move the slider to simulate a price change')); morph($('hit'), empty('No move selected')); morph($('hit-meta'), ''); shown = key; stressDone(); return; } // no move: the mark as it is
     let r;
     try { r = await get(`markets/${id}/stress?move_pct=${at}`, { maxAge: 0 }); } catch (error) {
