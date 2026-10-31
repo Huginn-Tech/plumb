@@ -245,7 +245,7 @@ function renderLive() {
   if (apiDown) setLive('bad', 'Offline', 'The data service is not answering');
   else if (streamLost()) setLive('warn', 'Reconnecting…', lastBlock ? `Live connection lost. Last block at ${clock(lastBlockAt)}; figures are from then.` : 'No live connection; reconnecting');
   else if (!block) return;
-  else if (since > DELAYED_MS) setLive('warn', `Delayed${minutes ? ` ${minutes}m` : ''} · #${int(block)}`, `No new block since ${clock(lastBlockAt)}. Figures are from then.`);
+  else if (since > DELAYED_MS) setLive('warn', `Delayed${minutes ? ` ${minutes}m` : ''}`, `No new block since ${clock(lastBlockAt)} (#${int(block)}). Figures are from then.`);
   else setLive('ok', `Live · #${int(block)}`, 'Latest finalized block indexed');
 }
 stream.on('block', b => { lastBlock = b; lastBlockAt = Date.now(); renderLive(); });
