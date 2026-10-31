@@ -948,7 +948,6 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
   #table .t tr > :nth-last-child(1 of :not(.hide-sm)) { padding-right: 16px; }
 }
 
-
 /* Status. The result line, in the head of Pipeline. */
 .st-result { display: inline-flex; align-items: center; gap: 8px; min-height: 17.4px; }
 .st-result b { color: var(--text); font-weight: 500; }
@@ -980,6 +979,27 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .doc-item { padding-bottom: 16px; break-inside: avoid; }
 @media (min-width: 1000px) { .doc { columns: 2; column-gap: 36px; } }
 
+/* Alerts. One slot under the features for the button, the note or the failure. */
+.alerts-cta { min-height: 36px; }
+@media (max-width: 494px) { .alerts-cta { min-height: 65.4px; align-content: flex-start; } } /* the note wraps under the button */
+.alerts-cta .panel-error { justify-content: flex-start; min-height: 36px !important; padding: 0; text-align: left; }
+.al-wait { width: 160px; height: 36px; }
+.al-watch .t td:last-child { min-width: 112px; }
+/* The panel head names the bell; the button keeps its label for a pointer and a screen reader. */
+@media (max-width: 1180px) {
+  .al-watch .t th { white-space: normal; line-height: 15px; }
+  .al-watch .t th, .al-watch .t td { padding-left: 8px; padding-right: 8px; }
+  .al-watch .t th:first-child, .al-watch .t td:first-child { padding-left: 18px; }
+  .al-watch .t th:last-child, .al-watch .t td:last-child { padding-right: 18px; }
+}
+@media (max-width: 860px) {
+  .al-bell span { display: none; }
+  .al-watch .t td:last-child { min-width: 0; }
+}
+@media (max-width: 640px) {
+  .al-watch .t th:first-child, .al-watch .t td:first-child { padding-left: 16px; }
+  .al-watch .t th:last-child, .al-watch .t td:last-child { padding-right: 16px; }
+}
 /* ========== end page: risk ========== */
 
 /* ========== page: overview (overview.js) ========== */
