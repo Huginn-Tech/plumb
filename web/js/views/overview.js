@@ -367,7 +367,7 @@ export function mount(el, { query, setQuery }) {
     fill($('tape'), table({ id: 'tape', compact: true, columns: [
       { key: 't', label: 'Time (UTC)', render: r => `<span class="muted num">${timeOnly(r.ts)}</span>` },
       { key: 'm', label: 'Market', cls: 'mkt-cell', render: r => mktLink(r.market, r.symbol) },
-      { key: 's', label: 'Action', tip: 'What the taker did. Green: bought. Red: sold.', render: tradeAction },
+      { key: 's', label: 'Action', tip: 'What the taker did: green bought, red sold. Liq marks a liquidation.', render: tradeAction },
       { key: 'p', label: 'Price', phone: false, n: true, render: r => price(r.price, dpOf(r.price)) },
       { key: 'v', label: 'Notional', n: true, render: r => amt(r.notional) }
     ], rows: rows.slice(0, 60), rowAttrs: r => `class="link ${r.fresh ? 'flash' : ''} ${r.proposed ? 'proposed' : ''}" data-href="/wallet/${esc(r.address || r.account)}" ${r.proposed ? `title="${stageTitle(r)}"` : ''}` }));
@@ -378,7 +378,7 @@ export function mount(el, { query, setQuery }) {
       { key: 'm', label: 'Market', cls: 'mkt-cell', render: r => mktLink(r.market, r.symbol) },
       { key: 's', label: 'Side', render: r => sideTag(r.side) },
       { key: 'v', label: 'Notional', n: true, render: r => amt(r.notional) },
-      { key: 't', label: 'Time', n: true, render: r => when(r.ts) }
+      { key: 't', label: 'Time', n: true, render: r => `<a href="/wallet/${esc(r.address || r.account)}" aria-label="${esc(`Wallet, ${ago(r.ts)}`)}">${when(r.ts)}</a>` }
     ], rows: l.rows.slice(0, LIST_ROWS), rowAttrs: r => `class="link" data-href="/wallet/${esc(r.address || r.account)}"` }) : empty('No liquidations yet'));
   }
   // Latest movements, or the window's largest depositors / withdrawers with their net.

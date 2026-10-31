@@ -915,7 +915,7 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 /* ========== page: overview (overview.js) ========== */
 /* overview rules */
 /* Cards keep the line a change sits on when a period has none, so All does not shrink them. */
-.keep-delta .kpi-row { min-height: 37px; }
+.keep-delta .kpi-row { min-height: 37px; align-content: flex-start; }
 /* The top switch names what it drives. */
 .ov-switch { display: inline-flex; align-items: center; gap: 10px; }
 #win-for { color: var(--text-3); font-size: 12px; white-space: nowrap; }
