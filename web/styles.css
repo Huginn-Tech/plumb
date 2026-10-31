@@ -771,6 +771,7 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
   .sm-ctl, .sm-group { width: 100%; }
   .sm-group { justify-content: space-between; }
 }
+@media (max-width: 380px) { #sm-desc { min-height: 5lh; } }
 @media (min-width: 861px) {
   .panel-head:has(> .sm-ctl) > div:first-child { flex: 1 1 0; min-width: 0; }
   .sm-ctl { flex: none; flex-wrap: nowrap; gap: 16px; }
@@ -847,6 +848,14 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .co-arrows { margin-left: auto; color: var(--text-3); font-size: 12px; }
 .co-top-head { min-height: 0; padding-top: 12px; }
 .co-top-head h3 { margin: 0; font-size: 13px; font-weight: 500; color: var(--text-2); }
+@media (max-width: 860px) { #co-desc { min-height: 2lh; } }
+@media (max-width: 640px) {
+  #co-desc { min-height: 3lh; }
+  .co-arrows { flex-basis: 100%; margin-left: 0; text-align: right; }
+}
+/* The cards keep their height when "All-time" takes the label to a second line. */
+@media (min-width: 861px) and (max-width: 1100px) { .traders-page .kpis.k4 .kpi { min-height: 155px; } }
+@media (max-width: 640px) { .traders-page .kpis.k4 .kpi:nth-child(-n+2) { min-height: 155px; } }
 
 /* Wallet: the tab strip sits on the page, each tab's cards below it. */
 .wallet-tabs .tabs { padding: 0 2px; }

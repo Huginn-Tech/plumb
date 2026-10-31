@@ -42,7 +42,7 @@ const LIMIT = 20, SM_ROWS = 12;
 const RULES = { whale: '≥ $100K notional', dolphin: '$10K–100K notional', fish: '$1K–10K notional', shrimp: '< $1K notional', top: '≥ +$10K all-time', winner: '$0 to +$10K all-time', loser: '-$10K to $0 all-time', rekt: '≤ -$10K all-time' };
 const CO_SIZE_DESC = "Open positions now, grouped by each trader's total open notional · click a cohort for its traders";
 // The cohorts panel's height with its strip: four cards to a row, two, or one.
-const coHeight = () => (matchMedia('(max-width: 640px)').matches ? 1210 : matchMedia('(max-width: 1240px)').matches ? 629 : 351);
+const coHeight = () => (matchMedia('(max-width: 640px)').matches ? 1232 : matchMedia('(max-width: 1240px)').matches ? 629 : 351);
 // A table amount: the short form, with the exact figure as its note.
 const money = v => `<span title="${esc(usdFull(v))}">${usdShort(v)}</span>`;
 // A skeleton or a failed panel gives way whole; anything else is patched in place.
