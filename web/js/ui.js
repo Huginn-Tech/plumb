@@ -301,6 +301,57 @@ export function morph(node, html) {
   patchKids(node, t.content);
 }
 
+// A panel that could not load: one line and Retry, at the height the panel had. The
+// next render writes over it, height included. Does nothing once the view has gone.
+export function panelError(node, message = 'Could not load this view.', retry = null) {
+  if (!node?.isConnected) return;
+  const on = node.firstElementChild;
+  if (on?.matches('.panel-error') && on.dataset.message === message) return; // already says so; a Retry in hand stays
+  const css = getComputedStyle(node);
+  const h = Math.max(0, node.clientHeight - parseFloat(css.paddingTop) - parseFloat(css.paddingBottom));
+  node.innerHTML = `<div class="panel-error" role="status" data-message="${esc(message)}" style="min-height:${Math.round(h)}px"><span class="status-dot warn"></span><span>${esc(message)}</span>${retry ? '<button class="btn ghost" type="button" data-retry>Retry</button>' : ''}</div>`;
+  node.querySelector('[data-retry]')?.addEventListener('click', e => {
+    const button = e.currentTarget;
+    button.disabled = true;
+    Promise.resolve().then(retry).catch(() => {}).finally(() => { button.disabled = false; });
+  });
+}
+
+// Runs a loader until it works: after a failure it waits 3 s, 6 s, 12 s, then 20 s
+// each time. alive says the view is still open; fail shows the failure. Returns a
+// stop for the view's destroy(), and writes nothing after that.
+export function keepTrying(load, { alive = () => true, fail = () => {} } = {}) {
+  let wait = 3000, timer = null, stopped = false;
+  const live = () => !stopped && alive();
+  const run = async () => {
+    if (!live()) return;
+    try { await load(); } catch (e) {
+      if (!live()) return;
+      fail(e);
+      timer = setTimeout(run, wait);
+      wait = Math.min(wait * 2, 20000);
+    }
+  };
+  run();
+  return () => { stopped = true; clearTimeout(timer); };
+}
+
+// A list that fills its panel shows whole rows, so no row is cut at the panel's foot.
+// Call once when the view opens; returns a stop for destroy().
+export function fitRows(el, { headH = 34, rowH = 38 } = {}) {
+  const panel = el?.parentElement;
+  if (!panel) return () => {};
+  const fit = () => {
+    el.style.maxHeight = '';
+    const h = el.getBoundingClientRect().height;
+    if (h > headH + rowH) el.style.maxHeight = `${headH + Math.floor((h - headH) / rowH) * rowH}px`;
+  };
+  const watcher = new ResizeObserver(fit);
+  watcher.observe(panel);
+  fit();
+  return () => watcher.disconnect();
+}
+
 // --- hover notes ------------------------------------------------------------------------
 // Every title="" on the site shows in one styled note instead of the browser's
 // plain box: on first hover the attribute moves to data-tip, so the native one
