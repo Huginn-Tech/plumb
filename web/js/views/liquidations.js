@@ -16,6 +16,8 @@ const pageOf = q => Math.max(0, (parseInt(q.get('page'), 10) || 1) - 1);
 // A table or note amount: the short form, with the exact figure as its note.
 const amt = v => (num(v) === null ? DASH : `<span class="amt" title="${esc(usdFull(v))}">${usdShort(v)}</span>`);
 const exactPrice = v => (num(v) === null ? DASH : price(v, dpOf(v)));
+// A skeleton or an error gives way to the table: patched over, its inline height would stay on the table's wrapper.
+const fresh = (node, html) => { node.querySelector(':scope > .sk-rows, :scope > .panel-error')?.remove(); morph(node, html); };
 const logBug = e => { if (e?.status === undefined && e?.code === undefined) console.error(e); };
 
 export function mount(el, { query, setQuery, keepQuery }) {
@@ -94,7 +96,7 @@ export function mount(el, { query, setQuery, keepQuery }) {
     const biggest = r => largestOne && r.tx === largestOne.tx && r.log_index === largestOne.log_index;
     const first = total ? page * PAGE + 1 : 0, last = page * PAGE + rows.length;
     const pager = pages > 1 ? `<div class="panel-foot pager"><span>${int(first)}–${int(last)} of ${int(total)}</span><span class="pager-ctl"><button class="btn ghost sm" data-action="prev" ${page === 0 ? 'disabled' : ''}>← Prev</button><span class="num">Page ${int(page + 1)} of ${int(pages)}</span><button class="btn ghost sm" data-action="next" ${page + 1 >= pages ? 'disabled' : ''}>Next →</button></span></div>` : '';
-    morph($('feed'), table({ id: 'liq', columns: [
+    fresh($('feed'), table({ id: 'liq', columns: [
       { key: 't', label: 'Time (UTC)', render: r => { const d = dateTime(r.ts); return `<span class="muted num"><span class="yr">${d.slice(0, 5)}</span>${d.slice(5)}</span>`; } },
       { key: 'm', label: 'Market', cls: 'mkt-cell', render: r => mktLink(r.market, r.symbol) },
       { key: 'k', label: 'Type', phone: false, tip: 'Order book: filled on the book. ADL and Force close: closed by the protocol.', render: r => (r.kind === 'deleverage' ? (r.force_close ? '<span class="tag warn">Force close</span>' : '<span class="tag warn">ADL</span>') : `<span class="tag">${r.on_book ? 'Order book' : 'Liquidation'}</span>`) },
