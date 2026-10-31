@@ -959,7 +959,7 @@ td.mkt-cell { position: relative; }
 }
 @media (min-width: 1101px) and (max-width: 1140px) { .keep-delta:not(.k4) .kpi-row { min-height: 54px; } }
 @media (min-width: 1000px) and (max-width: 1140px) { #fees-v, #liq-v, #taker-v { min-height: 71px; } }
-@media (min-width: 641px) and (max-width: 999px) { #liq-lg { min-height: 39px; } }
+@media (min-width: 641px) and (max-width: 999px) { #liq-lg:empty { display: block; min-height: 38.8px; } }
 @media (max-width: 860px) { .panel-head.vol-keys { min-height: 61px; } }
 /* Stacked, the list takes its height from its rows: it keeps it, however few trades the size filter leaves. */
 @media (max-width: 1100px) { #tape { min-height: 452px; } }

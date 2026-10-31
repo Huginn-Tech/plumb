@@ -101,7 +101,7 @@ export function mount(el, { query, setQuery }) {
       </div>
       <div class="section-label">Market share</div>
       <div class="grid g-2" id="landscape-grid">
-        <section class="panel fill"><div class="panel-head"><div><h2>Perps on Monad</h2><div class="desc">Open interest by venue</div></div><span class="meta" id="ls-chain-meta"></span></div><div class="panel-body flush fill-table ls-table" id="ls-chain">${skRows(3, stacked(860) ? 38 : 76, 34)}</div></section>
+        <section class="panel fill"><div class="panel-head"><div><h2>Perps on Monad</h2><div class="desc">Open interest by venue</div></div><span class="meta" id="ls-chain-meta"></span></div><div class="panel-body flush fill-table ls-table" id="ls-chain">${skRows(3, stacked(999) ? 38 : 76, 34)}</div></section>
         <section class="panel"><div class="panel-head"><div><h2>Among all perps</h2><div class="desc">Open interest by venue</div></div><span class="meta" id="ls-meta"></span></div><div class="panel-body flush ls-table" id="ls-all">${skRows(6, 38, 34)}</div></section>
       </div>
     </div>`;
