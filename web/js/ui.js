@@ -1,6 +1,7 @@
 // Small UI components rendered as HTML strings (every dynamic value goes
 // through esc) plus the watchlist store, market colour assignment and the
 // sideways-scrolling nav and tab strips.
+import { get } from './api.js';
 import { esc, short, num, usd, usdShort, usdFull, pct, bps, deltaHtml, signClass } from './format.js';
 
 export const ICON = {
@@ -350,6 +351,27 @@ export function fitRows(el, { headH = 34, rowH = 38 } = {}) {
   watcher.observe(panel);
   fit();
   return () => watcher.disconnect();
+}
+
+// Turns what someone typed into a wallet: a full address, an account ID (#1767), an
+// address prefix, or an address as the site prints it (0x471b…8ffd). key opens a
+// wallet when the text names one, rows are the matches, note says why there are none.
+// An unreachable API throws, except for a full address or an ID, which need no lookup.
+const CUT_ADDRESS = /^(0x[0-9a-f]{3,38})(?:…|\.{2,3})([0-9a-f]{1,38})$/i;
+export async function resolveWallet(text) {
+  const q = String(text ?? '').trim().replace(/^#/, '');
+  const none = note => ({ key: null, rows: [], note });
+  if (!q) return none('');
+  const cut = q.match(CUT_ADDRESS), exact = /^(0x[0-9a-f]{40}|\d{1,9})$/i.test(q);
+  if (!cut && !exact) {
+    if (!/^0x[0-9a-f]*$/i.test(q)) return none('Enter a 0x address (or prefix) or an account ID');
+    if (q.length < 5) return none('Keep typing: at least 3 hex digits');
+  }
+  const found = await get(`search?q=${encodeURIComponent(cut?.[1] ?? q)}`, { maxAge: 10000 }).catch(e => { if (exact) return null; throw e; });
+  if (!found) return { key: q, rows: [], note: '' };
+  const end = cut?.[2].toLowerCase();
+  const rows = end ? found.rows.filter(r => r.address.toLowerCase().endsWith(end)) : found.rows;
+  return { key: exact ? q : rows.length === 1 ? rows[0].address : null, rows, note: rows.length ? '' : 'No Perpl account found' };
 }
 
 // --- hover notes ------------------------------------------------------------------------
