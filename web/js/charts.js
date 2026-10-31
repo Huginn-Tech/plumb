@@ -234,7 +234,9 @@ function sparklineNow(el, values, { color = T.accent, area = true } = {}) {
 // A range slider under a time chart (drag or scroll to zoom), plus wheel zoom.
 // A chart redrawn in place (a refresh) keeps the stretch the reader zoomed to.
 export const CUMULATIVE = 'Cumulative';
-const zoomOf = chart => { const z = chart.getOption()?.dataZoom?.[0]; return z && (z.start > 0 || z.end < 100) ? { start: z.start, end: z.end } : null; };
+// A new window starts from the whole range: call dropZoom just before asking for it.
+export const dropZoom = el => { if (el?.__chart) el.__chart.__dropZoom = true; };
+const zoomOf = chart => { if (chart.__dropZoom) { chart.__dropZoom = false; return null; } const z = chart.getOption()?.dataZoom?.[0]; return z && (z.start > 0 || z.end < 100) ? { start: z.start, end: z.end } : null; };
 function zoomOptions(xAxisIndex = 0, kept = null) {
   return [
     { type: 'inside', xAxisIndex, zoomOnMouseWheel: 'shift', moveOnMouseMove: false, ...kept },
