@@ -1,8 +1,8 @@
 // Shell: router, header (search, live status), event delegation, the
 // server-sent event stream and the indexing banner.
 import { get, stream, openStale, closeStale } from './api.js';
-import { esc, short, int, dateTime, price, pct, signClass } from './format.js';
-import { watch, toast, ICON, assignColors, download, logo, setAlertsBot, go, panelError, resolveWallet } from './ui.js';
+import { esc, short, int, dateTime, price, dpOf, pct, signClass } from './format.js';
+import { watch, toast, ICON, assignColors, download, logo, setAlertsBot, go, panelError, resolveWallet, morph } from './ui.js';
 import { disposeAll, chartCsv, chartPng } from './charts.js';
 
 // Path, view, and the page's name in the tab title (a function of the path's params).
@@ -168,6 +168,7 @@ document.addEventListener('click', event => {
   if (!a || a.target || a.hasAttribute('download')) return;
   const url = new URL(a.href, location.href);
   if (url.origin !== location.origin || !routes.some(([re]) => re.test(url.pathname))) return;
+  if (url.hash && url.pathname === location.pathname && url.search === location.search) return; // a jump within the page
   event.preventDefault();
   go(url.pathname + url.search);
 });
@@ -277,7 +278,7 @@ function renderTicker(markets) {
   const ch = Number(m.change_pct);
   ticker.hidden = false;
   ticker.href = `/markets/${m.id}`;
-  ticker.innerHTML = `${logo(m.id, 'MON', 16)}<span class="tp">$${esc(price(p))}</span>${Number.isFinite(ch) ? `<span class="${signClass(ch) || 'faint'}">${pct(ch, { sign: true })}</span>` : ''}`;
+  morph(ticker, `${logo(m.id, 'MON', 16)}<span class="tp">$${esc(price(p, dpOf(p)))}</span>${Number.isFinite(ch) ? `<span class="${signClass(ch) || 'faint'}">${pct(ch, { sign: true })}</span>` : ''}`);
 }
 stream.on('protocol', p => renderTicker(p.markets));
 get('protocol?window=24h', { maxAge: 5000 }).then(p => renderTicker(p.markets)).catch(() => {});

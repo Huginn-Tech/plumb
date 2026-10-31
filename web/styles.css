@@ -932,6 +932,13 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .dash { color: var(--text-4); }
 #view:focus { outline: none; } /* the router moves focus here after a page change */
 .live.active { color: var(--text); background: rgba(255, 255, 255, 0.06); }
+/* The header holds its shape while it fills in: the MON price lands after the first
+   paint, and the pill goes from Connecting… to the block. */
+@media (min-width: 641px) { .live { min-width: 164px; } }
+@media (min-width: 1241px) { .ticker[hidden] { display: flex !important; visibility: hidden; min-width: 146px; } }
+@media (min-width: 1041px) and (max-width: 1240px) { .ticker[hidden] { display: flex !important; visibility: hidden; min-width: 98px; } }
+.skip-link { position: absolute; left: 12px; top: -44px; z-index: 30; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--menu); color: var(--text); font-size: 13px; }
+.skip-link:focus { top: 10px; }
 /* Reading text stops at 12px; 11px is for chips and chart ticks only. */
 .kpi-basis, .kpi-note, .t .sub, .t .note, .t .sub-sm, .legend.dots, .legend .lg, .ratio-wrap .lbl, .head-value .hn, .book-row.head, .book-mid .faint, .calc-note, .risk-foot, .seg.sm button, .rank-pill, .side, .co-id span, .co-ls, .co-share, .co-stats > span, .co-mk, .cmp-facts dt, .heat, .cal-days, .cal-months, .t tr.grp td, .tg-time { font-size: 12px; }
 .t .sub, .t .sub-sm { line-height: 16px; }
