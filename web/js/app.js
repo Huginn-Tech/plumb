@@ -5,18 +5,35 @@ import { esc, short, int, dateTime, price, pct, signClass } from './format.js';
 import { watch, toast, ICON, assignColors, download, logo, setAlertsBot, go, panelError } from './ui.js';
 import { disposeAll, chartCsv, chartPng } from './charts.js';
 
+// Path, view, and the page's name in the tab title (a function of the path's params).
+const marketNames = new Map();
 const routes = [
-  [/^\/?$/, () => import('./views/overview.js')],
-  [/^\/markets\/?$/, () => import('./views/markets.js')],
-  [/^\/markets\/(\d+)$/, () => import('./views/market.js')],
-  [/^\/traders\/?$/, () => import('./views/traders.js')],
-  [/^\/liquidations\/?$/, () => import('./views/liquidations.js')],
-  [/^\/risk\/?$/, () => import('./views/risk.js')],
-  [/^\/wallet\/([0-9a-zA-Zx]{1,42})$/, () => import('./views/wallet.js')],
-  [/^\/compare\/?$/, () => import('./views/compare.js')],
-  [/^\/(?:alerts|watchlist)\/?$/, () => import('./views/alerts.js')], // the watchlist lives on the alerts page
-  [/^\/status\/?$/, () => import('./views/status.js')]
+  [/^\/?$/, () => import('./views/overview.js'), null],
+  [/^\/markets\/?$/, () => import('./views/markets.js'), 'Markets'],
+  [/^\/markets\/(\d+)$/, () => import('./views/market.js'), ([id]) => marketNames.get(Number(id)) ?? 'Market'],
+  [/^\/traders\/?$/, () => import('./views/traders.js'), 'Traders'],
+  [/^\/liquidations\/?$/, () => import('./views/liquidations.js'), 'Liquidations'],
+  [/^\/risk\/?$/, () => import('./views/risk.js'), 'Risk'],
+  [/^\/wallet\/([0-9a-zA-Zx]{1,42})$/, () => import('./views/wallet.js'), ([key]) => `Wallet ${/^\d+$/.test(key) ? `#${key}` : short(key)}`],
+  [/^\/compare\/?$/, () => import('./views/compare.js'), 'Compare wallets'],
+  [/^\/(?:alerts|watchlist)\/?$/, () => import('./views/alerts.js'), 'Alerts'], // the watchlist lives on the alerts page
+  [/^\/status\/?$/, () => import('./views/status.js'), 'Data & methodology']
 ];
+const HOME_TITLE = document.title;
+function setTitle(path) {
+  const hit = routes.find(([re]) => re.test(path));
+  const name = !hit ? 'Page not found' : typeof hit[2] === 'function' ? hit[2](path.match(hit[0]).slice(1)) : hit[2];
+  const title = name ? `${name} · Plumb` : HOME_TITLE;
+  if (document.title !== title) document.title = title;
+}
+// The header link a path belongs to; /status is the live pill.
+const SECTIONS = { '': 'overview', markets: 'markets', traders: 'traders', wallet: 'traders', compare: 'traders', liquidations: 'liquidations', risk: 'risk', alerts: 'alerts', watchlist: 'alerts' };
+function markSection(path) {
+  const first = path.split('/')[1] ?? '';
+  const mark = (a, on) => { a.classList.toggle('active', on); if (on) a.setAttribute('aria-current', a.getAttribute('href') === path ? 'page' : 'true'); else a.removeAttribute('aria-current'); };
+  document.querySelectorAll('.nav a').forEach(a => mark(a, a.dataset.nav === SECTIONS[first]));
+  mark(document.getElementById('live'), first === 'status');
+}
 
 const view = document.getElementById('view');
 let current = null; // { key, mod, instance }
@@ -84,7 +101,8 @@ async function route(queryOnly = false, y = 0) {
   const { path, query } = parseLocation();
   shown = location.pathname + location.search;
   const hit = routes.find(([re]) => re.test(path));
-  document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === (path.match(/^\/[a-z]*/)?.[0] ?? '/') || (path === '/' && a.dataset.nav === 'overview') || ((path.startsWith('/wallet') || path.startsWith('/compare')) && a.dataset.nav === 'traders') || (path.startsWith('/markets') && a.dataset.nav === 'markets') || (path.startsWith('/watchlist') && a.dataset.nav === 'alerts')));
+  markSection(path);
+  setTitle(path);
   if (!hit) { leavePage(); leaving = false; view.innerHTML = '<div class="page-head"><div><h1>Page not found</h1></div></div><div class="empty-state"><a href="/">Back to overview</a></div>'; window.scrollTo({ top: 0 }); return; }
   const params = path.match(hit[0]).slice(1);
   const key = `${hit[0]}:${params.join('/')}`;
@@ -177,7 +195,7 @@ document.addEventListener('keydown', e => { if (e.key === '/' && !['INPUT', 'TEX
 const live = document.getElementById('live'), liveText = document.getElementById('live-text'), banner = document.getElementById('banner');
 let lastBlock = null, lastBlockAt = 0, streamOpen = true;
 live.querySelector('.dot').insertAdjacentHTML('afterend', `<span class="live-ico">${ICON.cube}</span>`);
-function setLive(state, text) { live.className = `live ${state}`; liveText.textContent = text; }
+function setLive(state, text) { live.classList.remove('ok', 'warn', 'bad'); live.classList.add(state); liveText.textContent = text; }
 // The pill shows the latest finalized block. A stream that drops and
 // reconnects within a few seconds (a deploy, a proxy hiccup) keeps the pill
 // steady; it warns only when blocks actually stop arriving.
@@ -206,6 +224,7 @@ stream.on('backfill', showBanner);
 // external feed), refreshed by every protocol push.
 const ticker = document.getElementById('ticker');
 function renderTicker(markets) {
+  if (markets?.length) { for (const m of markets) marketNames.set(Number(m.id), m.symbol); setTitle(location.pathname); }
   const m = markets?.find(x => String(x.symbol).toUpperCase() === 'MON');
   const p = m?.mark ?? m?.close;
   if (!m || p === null || p === undefined) return;
