@@ -300,9 +300,9 @@ async function poll() {
     polledBlock = h.index?.live?.to ?? polledBlock;
   } catch (error) { if (error.status !== 429) apiDown = true; } // the rate limit is not an outage
   renderLive();
-  if (!apiDown && (wasDown || streamLost())) refreshView();
   clearTimeout(pollTimer);
   pollTimer = setTimeout(poll, apiDown ? 5000 : streamLost() ? 15000 : 30000);
+  if (!apiDown && (wasDown || streamLost())) refreshView(); // last: a view's refresh cannot stop the polling
 }
 poll();
 stream.connect();
