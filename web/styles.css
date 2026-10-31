@@ -16,12 +16,14 @@
   --control-edge: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 0 1px rgba(255, 255, 255, 0.08);
   --menu: #1e1b23;
   --tooltip: #24222a;
-  --line: rgba(255, 255, 255, 0.07);
+  --line: rgba(255, 255, 255, 0.06);
   --line-2: rgba(255, 255, 255, 0.12);
+  --line-group: rgba(255, 255, 255, 0.10);
   --grid: rgba(255, 255, 255, 0.05);
   --text: #ffffff;
-  --text-2: rgba(224, 225, 255, 0.70);
-  --text-3: rgba(255, 255, 255, 0.5);
+  --text-2: rgba(232, 233, 255, 0.80);
+  --text-3: rgba(232, 233, 255, 0.64);
+  --text-4: rgba(232, 233, 255, 0.42); /* dashes in empty cells, never words */
   --accent: #a2a4ff;
   --accent-strong: #6f5cff;
   --accent-hover: #6366fe;
@@ -30,6 +32,10 @@
   --short: #f65a6e;
   --long-soft: rgba(129, 199, 132, 0.12);
   --short-soft: rgba(246, 90, 110, 0.12);
+  --short-text: #ff7d8e; /* red text, a step lighter than the fills so it reads as well as green */
+  --th-bg: #1a191b; /* table header strip, opaque so it can stick */
+  --frame: rgba(255, 255, 255, 0.045); /* the transparent frame round related figures */
+  --frame-accent: rgba(162, 164, 255, 0.07); /* the band on the column a table ranks by */
   --warn: #ffa726;
   --info: #29b6f6;
   /* categorical (validated, dark surface) */
@@ -239,29 +245,28 @@ button, input, select { font: inherit; color: inherit; }
   @media (min-width: 861px) { .nav { mask-image: none; } }
 }
 table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
-.t th { position: sticky; top: 0; background: var(--surface); text-align: left; font-weight: 400; font-size: 12px; color: var(--text-3); padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; user-select: none; }
+.t th { position: sticky; top: 0; background: var(--surface); text-align: left; font-weight: 400; font-size: 12px; color: var(--text-2); padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; user-select: none; }
 .t th.n, .t td.n { text-align: right; }
 .t th.c, .t td.c { text-align: center; }
 .t th.sort { cursor: pointer; }
-.t th.sort:hover { color: var(--text-2); }
+.t th.sort:hover { color: var(--text); }
 .t th.sorted { color: var(--text); }
-/* Cells align to the top with a fixed inset, so the first line of every cell
-   (the value) sits on one line across the row; a second line (APR, counts)
-   hangs below it instead of pushing the value up. */
-.t td { padding: 11px 12px 8px; height: 42px; vertical-align: top; border-bottom: 1px solid var(--line); white-space: nowrap; }
+/* A row's height comes from the kind of table, never from its content; the
+   system block at the end of this file has the heights. */
+.t td { padding: 4px 12px; height: 44px; vertical-align: middle; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .t tr:last-child td { border-bottom: 0; }
 .t tbody tr { transition: background 0.12s; }
 .t tbody tr.link { cursor: pointer; }
-.t tbody tr:hover { background: rgba(162, 164, 255, 0.045); }
+.t tbody tr:hover { background: rgba(162, 164, 255, 0.07); }
 .t td:first-child, .t th:first-child { padding-left: 18px; }
 .t td:last-child, .t th:last-child { padding-right: 18px; }
-.t.compact td { height: 36px; padding-top: 8px; padding-bottom: 6px; }
+.t.compact td { height: 38px; padding-top: 3px; padding-bottom: 3px; }
 /* The live tape sits in the narrow column: tighter cells so every column fits. */
 #tape .t th, #tape .t td { padding-left: 8px; padding-right: 8px; }
 #tape .t th:first-child, #tape .t td:first-child { padding-left: 14px; }
 #tape .t th:last-child, #tape .t td:last-child { padding-right: 14px; }
 #tape .mkt { gap: 6px; }
-.t .sub { color: var(--text-3); font-size: 11.5px; }
+.t .sub { color: var(--text-3); font-size: 12px; line-height: 16px; }
 .t tr.flash td { animation: flash 1.6s ease-out; }
 @keyframes flash { from { background: rgba(162, 164, 255, 0.14); } to { background: transparent; } }
 .t tr.proposed td { opacity: 0.55; }
@@ -295,7 +300,6 @@ td.c.cell-bar .track { right: auto; left: 50%; transform: translateX(-50%); }
 .rank-pill { display: inline-block; min-width: 34px; padding: 1px 6px; border-radius: 3px; font-size: 11.5px; font-weight: 500; text-align: center; color: var(--text-2); background: rgba(255, 255, 255, 0.06); font-variant-numeric: tabular-nums; }
 /* Not ".top": that is the site header (sticky, z-index), which a pill must never inherit. */
 .rank-pill.lead { color: var(--accent); background: var(--accent-soft); }
-tr.inactive td { opacity: 0.5; }
 .sub.tags { display: flex; gap: 4px; margin-top: 3px; }
 .sub.tags .tag { font-size: 10.5px; padding: 1px 5px; cursor: help; }
 .addr { display: inline-flex; align-items: center; gap: 4px; }
@@ -874,3 +878,47 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 
 /* Compare: where a wallet's round-trip rows start (long histories are cut). */
 .cmp-since { color: var(--warn); font-size: 12px; }
+
+/* ========== system: type floor, table rhythm, frames ==========
+   Last in the file on purpose: these must win over equal selectors above, the
+   page blocks included. A page rule that changes one of them needs a page-scoped
+   selector (#board, .markets-list, a page class). */
+.dash { color: var(--text-4); }
+/* Reading text stops at 12px; 11px is for chips and chart ticks only. */
+.kpi-basis, .kpi-note, .t .sub, .t .note, .t .sub-sm, .legend.dots, .legend .lg, .ratio-wrap .lbl, .head-value .hn, .book-row.head, .book-mid .faint, .calc-note, .risk-foot, .seg.sm button, .rank-pill, .side, .co-id span, .co-ls, .co-share, .co-stats > span, .co-mk, .cmp-facts dt, .heat, .cal-days, .cal-months, .t tr.grp td, .tg-time { font-size: 12px; }
+.t .sub, .t .sub-sm { line-height: 16px; }
+.tag, .sub.tags .tag { font-size: 11px; font-weight: 500; }
+.info-tip { width: 14px; height: 14px; font-size: 10px; }
+/* Table rhythm: 44px rows, 38px compact, 52px and 48px when every row has a second
+   line. Those tables keep to the top, so first lines stay on one line across the
+   row; a group label row keeps its own height. */
+.t th { color: var(--text-2); font-weight: 400; }
+.t th.sort:hover { color: var(--text); }
+.t td { height: 44px; padding-top: 4px; padding-bottom: 4px; vertical-align: middle; }
+.t.compact td { height: 38px; padding-top: 3px; padding-bottom: 3px; }
+.t:has(td div.sub) td { height: 52px; vertical-align: top; padding-top: 8px; }
+.t.compact:has(td div.sub) td { height: 48px; padding-top: 5px; }
+.t:has(td div.sub) tr.grp td, .t.compact:has(td div.sub) tr.grp td { height: 34px; padding-top: 14px; padding-bottom: 6px; vertical-align: bottom; }
+.t td .mkt, .t td .addr, .t td .tag, .t td .side, .t td .rank-pill { vertical-align: middle; }
+.t td .tag, .t td .side { margin-top: 0; }
+.cell-bar .track, .t.compact .cell-bar .track { top: calc(50% + 11px); }
+/* Long lists: no line under each row, a soft one every fifth. */
+.t:has(tbody tr:nth-child(10)) td { border-bottom: 0; }
+.t:has(tbody tr:nth-child(10)) tbody tr:nth-child(5n):not(:last-child) td { border-bottom: 1px solid var(--line-group); }
+.t tbody tr:hover { background: rgba(162, 164, 255, 0.07); }
+/* The header strip. */
+.panel-body.flush > .table-wrap .t th { background: var(--th-bg); border-bottom: 0; height: 34px; padding-top: 0; padding-bottom: 0; }
+/* The band on the column a table ranks or sorts by. Separate borders let its last
+   cell round; the gradient only lays the tint over the opaque header. */
+table.t { border-collapse: separate; border-spacing: 0; }
+.t th.sorted, .t td.col-rank, .t th.col-rank { background: linear-gradient(var(--frame-accent), var(--frame-accent)), var(--th-bg); color: var(--text); }
+.panel-body.flush > .table-wrap .t th.sorted, .panel-body.flush > .table-wrap .t th.col-rank { background: linear-gradient(var(--frame-accent), var(--frame-accent)), var(--th-bg); }
+.t th.sorted { z-index: 1; } /* its arrow sits in the padding, over the next header */
+.t td.col-rank { background: var(--frame-accent); }
+.t tbody tr:last-child td.col-rank { border-radius: 0 0 8px 8px; }
+.neg, .delta.down, .side.short, .tag.bad, .book-row.ask > span:first-of-type { color: var(--short-text); }
+/* Idle rows step back by token, not opacity, so faint text keeps its contrast. */
+tr.inactive td, tr.inactive td.col-rank { opacity: 1; color: var(--text-3); }
+tr.inactive td .faint, tr.inactive td .sub, tr.inactive td .tag, tr.inactive td .mkt, tr.inactive td .muted { color: var(--text-3); }
+tr.inactive td .tag { background: rgba(255, 255, 255, 0.05); }
+tr.inactive .tk { opacity: 0.55; }
