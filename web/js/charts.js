@@ -23,6 +23,9 @@ function sweep() {
     registry.delete(c);
   }
 }
+// An inside zoom takes every wheel event over its chart, whatever zoomOnMouseWheel says.
+// Stopped on the way down, a plain wheel never reaches it and scrolls the page.
+const wheelScrolls = e => { if (!e.shiftKey) e.stopPropagation(); };
 function init(el) {
   if (!el || !window.echarts) return null;
   let chart = el.__chart;
@@ -36,6 +39,7 @@ function init(el) {
   if (!chart) {
     sweep(); // a re-rendered card leaves its old chart behind with no one to dispose it
     el.replaceChildren(); // a skeleton or message in the node gives way to the chart
+    el.addEventListener('wheel', wheelScrolls, { capture: true, passive: true }); // one function, so a redrawn node still has one listener
     chart = window.echarts.init(el, null, { renderer: 'canvas' });
     chart.__root = el.lastElementChild; // echarts appends its own root
     el.__chart = chart; registry.add(chart); observer?.observe(el);
@@ -231,7 +235,7 @@ function sparklineNow(el, values, { color = T.accent, area = true } = {}) {
   }, true);
 }
 
-// A range slider under a time chart (drag or scroll to zoom), plus wheel zoom.
+// A range slider under a time chart, plus Shift and the wheel to zoom.
 // A chart redrawn in place (a refresh) keeps the stretch the reader zoomed to.
 export const CUMULATIVE = 'Cumulative';
 // A new window starts from the whole range: call dropZoom just before asking for it.
