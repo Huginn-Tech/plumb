@@ -87,11 +87,32 @@ export function addr(address, account, { star = true, after = '' } = {}) {
   const label = address ? short(address) : `#${esc(account)}`;
   return `<span class="addr"><a href="/wallet/${esc(key)}" title="${esc(address || `Account ${account}`)}">${label}</a>${address ? `<button class="icon-btn" data-copy="${esc(address)}" title="Copy address">${ICON.copy}</button>` : ''}${star ? `<button class="icon-btn ${watch.has(key) ? 'on' : ''}" data-watch="${esc(key)}" title="Watch wallet">${watch.has(key) ? ICON.star : ICON.starOff}</button>` : ''}${after}</span>`;
 }
+// A line of small print: each part between " · " becomes a piece of .dotline (styles.css),
+// so a wrapped line neither starts nor ends on a dot. Takes HTML and splits only
+// outside tags, so a dot inside a span or a note stays where it is. `after` goes
+// at the end of the last part (an info tip follows the last word).
+const VOID_TAG = /^<(?:img|br|hr|input)\b/i;
+function dotParts(html) {
+  const parts = [];
+  let depth = 0, from = 0;
+  for (const m of html.matchAll(/<[^>]*>| · /g)) {
+    const t = m[0];
+    if (t === ' · ') { if (!depth) { parts.push(html.slice(from, m.index)); from = m.index + t.length; } } else if (t[1] === '/') depth--; else if (!t.endsWith('/>') && !VOID_TAG.test(t)) depth++;
+  }
+  parts.push(html.slice(from));
+  return parts;
+}
+export function keepDots(html, after = '') {
+  const parts = dotParts(String(html ?? ''));
+  if (parts.length < 2) return `${parts[0]}${after}`;
+  return `<span class="dotline">${parts.map((part, i) => `<span class="kn">${i ? '<i> · </i>' : ''}${part}${i === parts.length - 1 ? after : ''}</span>`).join('')}</span>`;
+}
+// The (i) beside a title or label: opens on hover, keyboard focus and tap.
+export const infoTip = (text, about = '') => (text ? ` <span class="info-tip" tabindex="0" aria-label="${esc(about ? `${about}: ${text}` : text)}" title="${esc(text)}">i</span>` : '');
+export { infoTip as tip };
 // basis: what the delta compares with, shown after it ("vs prev", "in 24h").
-// A " · " in the label or the note keeps to the word before it, so a wrapped line never starts with it.
-export const keepDots = html => String(html).replaceAll(' · ', '\u00a0· ');
 export function kpi({ label, value, delta = undefined, invert = false, basis = null, basisTitle = null, note = '', spark = null, tip = null, cls = '' }) {
-  return `<div class="kpi ${cls}"><div class="kpi-label">${keepDots(esc(label))}${tip ? ` <span class="info-tip" tabindex="0" title="${esc(tip)}">i</span>` : ''}</div><div class="kpi-value">${value}</div><div class="kpi-row">${delta === undefined ? '' : `${deltaHtml(delta, invert, basisTitle)}${basis ? `<span class="kpi-basis">${esc(basis)}</span>` : ''}`}<span class="kpi-note">${keepDots(note)}</span></div>${spark ? `<div class="spark" id="${esc(spark)}"></div>` : ''}</div>`;
+  return `<div class="kpi ${cls}"><div class="kpi-label">${keepDots(esc(label), infoTip(tip, label))}</div><div class="kpi-value">${value}</div><div class="kpi-row">${delta === undefined ? '' : `${deltaHtml(delta, invert, basisTitle)}${basis ? `<span class="kpi-basis">${esc(basis)}</span>` : ''}`}<span class="kpi-note">${keepDots(note)}</span></div>${spark ? `<div class="spark" id="${esc(spark)}"></div>` : ''}</div>`;
 }
 // Moves to a page of the dashboard; the router in app.js answers the popstate.
 export const go = url => { history.pushState(null, '', url); dispatchEvent(new PopStateEvent('popstate')); };
