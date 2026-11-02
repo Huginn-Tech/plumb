@@ -720,7 +720,7 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 /* Narrow desktops: the three-line key and the wrapped notes, held while the charts load;
    the list's sideways scrollbar likewise. */
 @media (min-width: 1000px) and (max-width: 1199px) { .m-kpis ~ .g-2 > .panel.trend:has(#funding > .skeleton, #ladder > .skeleton, #entries > .skeleton) > .panel-head { min-height: 125px; } }
-@media (min-width: 641px) and (max-width: 1199px) { #list:has(> .sk-rows) { min-height: 797px; } }
+@media (min-width: 641px) and (max-width: 1199px) { .markets-list #list:has(> .sk-rows) { min-height: 797px; } }
 /* The read age stays on one line; the description beside it wraps first. */
 @media (min-width: 641px) { #book-meta { flex: none; } }
 /* Position flow writes its note out in full: the key takes a fixed three rows, so the head
@@ -882,7 +882,7 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 #board .addr { height: 20px; gap: 3px; }
 #pager .num { min-width: 92px; text-align: center; }
 /* In a tall region a failure speaks near the top, where the reader is. */
-#list .panel-error, #cohorts .panel-error { align-items: flex-start; padding-top: 96px; }
+#board #list .panel-error, #cohorts .panel-error { align-items: flex-start; padding-top: 96px; }
 .ep-chips .ep-chip:first-child { min-width: 48px; }
 #by .ep-chip { font-size: 13px; font-weight: 500; padding: 5px 11px; } /* as the switches beside them; lit or not, the same width */
 /* Column widths by kind, each the widest figure or label seen plus padding, so a
@@ -1228,7 +1228,7 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 /* The legend stacks at a fixed width, so the ladder's line never wraps and both cards keep their height. */
 @media (min-width: 641px) { .rk-ladder .legend.dots { flex: none; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 36.8px; } }
 @media (max-width: 640px) { .rk-ladder .legend.dots { flex: 0 0 100%; min-height: 17.4px; } }
-#ladder-lg:empty { display: flex; }
+.rk-ladder #ladder-lg:empty { display: flex; }
 #hit { display: flex; flex-direction: column; min-height: 338px; }
 #hit > .empty-state { margin: auto 0; }
 /* Fixed columns: dragging the slider changes the figures, not where they sit. */
@@ -1245,14 +1245,14 @@ select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 @media (max-width: 640px) { #stress { min-height: 336px; } }
 /* By market: under the width that holds the labels on one line, a head wraps before a row scrolls. */
 @media (max-width: 1180px) {
-  #table .t th { white-space: normal; line-height: 15px; }
-  #table .t th, #table .t td { padding-left: 8px; padding-right: 8px; }
-  #table .t th:first-child, #table .t td:first-child { padding-left: 18px; }
-  #table .t th:last-child, #table .t td:last-child { padding-right: 18px; }
+  .rk-markets #table .t th { white-space: normal; line-height: 15px; }
+  .rk-markets #table .t th, .rk-markets #table .t td { padding-left: 8px; padding-right: 8px; }
+  .rk-markets #table .t th:first-child, .rk-markets #table .t td:first-child { padding-left: 18px; }
+  .rk-markets #table .t th:last-child, .rk-markets #table .t td:last-child { padding-right: 18px; }
 }
 @media (max-width: 640px) {
-  #table .t th:first-child, #table .t td:first-child { padding-left: 16px; }
-  #table .t tr > :nth-last-child(1 of :not(.hide-sm)) { padding-right: 16px; }
+  .rk-markets #table .t th:first-child, .rk-markets #table .t td:first-child { padding-left: 16px; }
+  .rk-markets #table .t tr > :nth-last-child(1 of :not(.hide-sm)) { padding-right: 16px; }
 }
 
 /* Status. The result line, in the head of Pipeline. */

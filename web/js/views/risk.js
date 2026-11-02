@@ -48,7 +48,7 @@ export function mount(el, { query, setQuery, keepQuery }) {
         <section class="panel rk-ladder"><div class="panel-head"><div><h2>Liquidation ladder</h2><div class="desc" id="ladder-meta"></div></div><div class="legend dots" id="ladder-lg"></div></div><div class="panel-body"><div class="chart" id="ladder">${skChart()}</div></div></section>
       </div>
       <section class="panel"><div class="panel-head"><h2>Largest positions exposed</h2><span class="meta" id="hit-meta"></span></div><div class="panel-body flush" id="hit">${skRows(HIT_ROWS, 38)}</div></section>
-      <section class="panel"><div class="panel-head"><h2>By market</h2><span class="meta">Each market’s worse direction, longs in a fall or shorts in a rise, so rows can add to more than the cards above; shortfall is equity below zero at that price</span></div><div class="panel-body flush" id="table">${skRows(MARKET_ROWS, 52, 34, 44)}</div></section>
+      <section class="panel rk-markets"><div class="panel-head"><h2>By market</h2><span class="meta">Each market’s worse direction, longs in a fall or shorts in a rise, so rows can add to more than the cards above; shortfall is equity below zero at that price</span></div><div class="panel-body flush" id="table">${skRows(MARKET_ROWS, 52, 34, 44)}</div></section>
     </div>`;
   const $ = s => el.querySelector(`#${s}`);
   const retry = () => load({ fresh: true });

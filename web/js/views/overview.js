@@ -41,7 +41,7 @@ export function mount(el, { query, setQuery }) {
   let feeView = 'type';
   let minSize = savedMinSize();
   // dataWin and flowsWin: the window the cards and the flow lists show, which trails w while its answer is on the way.
-  let data = null, series = null, dataWin = null, alive = true, flows = null, flowsWin = null, flowView = 'recent', lastQuiet = Date.now();
+  let data = null, series = null, dataWin = null, alive = true, flows = null, flowsWin = null, flowsFailed = false, flowView = 'recent', lastQuiet = Date.now();
   let tapeLoaded = false, liqsLoaded = false, lsLoaded = false;
   const tape = [], off = [], hidden = new Set(), sparks = {}, trendAsk = {};
   // One hold per region, taken on a press and let go by the answer that lands.
@@ -174,9 +174,9 @@ export function mount(el, { query, setQuery }) {
     const ask = ++flowAsk, win = w;
     const f = await get(`flows?window=${win}`, fresh ? { maxAge: 0 } : undefined);
     if (!alive || ask !== flowAsk) return;
-    flows = f; flowsWin = win; undim('flowlist'); renderFlows();
+    flows = f; flowsWin = win; flowsFailed = false; undim('flowlist'); renderFlows();
   }
-  const startFlows = (fresh = false) => run('flows', () => loadFlows(fresh), e => { logBug(e); undim('flowlist'); if (flowsWin !== w) renderFlows(); });
+  const startFlows = (fresh = false) => run('flows', () => loadFlows(fresh), e => { logBug(e); flowsFailed = true; undim('flowlist'); if (flowsWin !== w) renderFlows(); });
 
   // Change over the window from the running-sum series (null until history is complete).
   function seriesChange(field, sr = series, win = dataWin) {
@@ -386,7 +386,7 @@ export function mount(el, { query, setQuery }) {
   function renderFlows() {
     const f = flows, node = $('flowlist');
     // The top lists belong to one window: another window's are no answer. Latest is the same on all of them.
-    if (flowsWin !== w && (!f || flowView !== 'recent')) { if (!held.flowlist) panelError(node, undefined, () => startFlows()); return; }
+    if (flowsWin !== w && (!f || flowView !== 'recent')) { if (flowsFailed && !held.flowlist) panelError(node, undefined, () => startFlows()); return; }
     const link = r => `class="link" data-href="/wallet/${esc(r.address || r.account)}"`;
     if (flowView === 'recent') {
       const rows = (f.recent ?? []).slice(0, LIST_ROWS);

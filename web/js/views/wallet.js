@@ -43,7 +43,7 @@ export function mount(el, { params, query, setQuery, navigate }) {
   const key = params[0];
   let tab = TABS.some(([v]) => v === query.get('tab')) ? query.get('tab') : 'overview';
   let pnlMode = 'cumulative', data = null, an = null, periods = null, alive = true, trades = [], next = null;
-  let shown = null, missing = false, failed = false, anFailed = false, periodsFailed = false, tradesBusy = false;
+  let shown = null, missing = false, failed = false, anFailed = false, periodsFailed = false, tradesBusy = null;
   let seq = 0, anSeq = 0, periodSeq = 0, stopAnalytics = null, stopPeriods = null, stopTrades = null;
   const $ = s => el.querySelector(`#${s}`);
 
@@ -348,9 +348,9 @@ export function mount(el, { params, query, setQuery, navigate }) {
   }
   // first: a fresh first page in place of what the list holds. One request at a time,
   // so a second press of Load more cannot fetch the same page twice.
-  async function loadTrades({ first = false } = {}) {
-    if (tradesBusy) return;
-    tradesBusy = true;
+  // A second caller waits on the request already out, so a retry loop begun meanwhile still sees it fail.
+  function loadTrades(opts) { tradesBusy ??= fetchTrades(opts).finally(() => { tradesBusy = null; }); return tradesBusy; }
+  async function fetchTrades({ first = false } = {}) {
     const more = $('more'); if (more) more.disabled = true;
     try {
       const r = await get(`wallets/${encodeURIComponent(data.account.address)}/trades?limit=100${next && !first ? `&before=${next}` : ''}`, { maxAge: 0 });
@@ -358,7 +358,6 @@ export function mount(el, { params, query, setQuery, navigate }) {
       trades = first ? r.rows : [...trades, ...r.rows]; next = r.next;
       renderTrades();
     } finally {
-      tradesBusy = false;
       if (alive && $('more')) $('more').disabled = false;
     }
   }

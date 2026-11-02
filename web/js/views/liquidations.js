@@ -168,7 +168,7 @@ export function mount(el, { query, setQuery, keepQuery }) {
   }
   $('mf').addEventListener('change', e => setQuery({ market: e.target.value || null, page: null }));
   const off = stream.on('liquidations', () => {
-    if (page !== 0) return;
+    if (page !== 0 || held.feed) return; // a press is on its way: its answer is the fresh list
     const ask = ++feedSeq;
     get(feedPath(0), { maxAge: 0 }).then(l => { if (alive && ask === feedSeq && page === 0) renderFeed({ ...l, rows: l.rows.map((r, i) => ({ ...r, fresh: i === 0 })) }); }).catch(() => {});
   });

@@ -48,11 +48,13 @@ function init(el) {
   chart.__refit = null; // so does the refit on a resize
   return chart;
 }
-// Exports: the plotted data (time-aligned series, as shown) and the image.
+// Exports: the plotted data (time-aligned series, as shown) and the image. A panel that
+// has since gone empty has lost the chart's root, so it has nothing to export.
+const live = el => { const chart = el?.__chart; return chart && !chart.isDisposed() && el.contains(chart.__root) ? chart : null; };
 // Text that a spreadsheet would run as a formula is prefixed with a quote.
 const csvCell = v => { let t = String(v ?? ''); if (typeof v === 'string' && /^[=+\-@\t\r]/.test(t) && !Number.isFinite(Number(t))) t = `'${t}`; return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
 export function chartCsv(el) {
-  const chart = el?.__chart; if (!chart) return null;
+  const chart = live(el); if (!chart) return null;
   const o = chart.getOption();
   const times = o.xAxis?.[0]?.data ?? [];
   const cols = [];
@@ -70,7 +72,7 @@ export function chartCsv(el) {
 // carries it in a band above the chart, right-aligned as in the head (entries
 // switched off in the chart are left out, a note without a dot stays faint).
 export function chartPng(el) {
-  const chart = el?.__chart; if (!chart) return null;
+  const chart = live(el); if (!chart) return null;
   const ratio = 2, src = chart.renderToCanvas({ pixelRatio: ratio, backgroundColor: T.surface });
   const keys = [...(el.closest('.panel')?.querySelectorAll('.legend > span, .legend > .lg:not(.off)') ?? [])].map(n => ({ color: n.querySelector('i')?.style.background || null, name: n.textContent.trim() })).filter(k => k.name);
   if (!keys.length) return src.toDataURL('image/png');
