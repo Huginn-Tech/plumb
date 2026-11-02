@@ -15,7 +15,7 @@ export function displayNames(value) {
 
 // A failure in words: no code or browser message reaches the screen. The API's
 // code stays on the error as .code, its HTTP status as .status.
-const WORDS = { RATE_LIMITED: 'Too many requests', SYNCING: 'The index is catching up', INVALID_ACCOUNT: 'Not a full address or account ID', NOT_FOUND: 'Not found' };
+const WORDS = { RATE_LIMITED: 'Too many requests', SYNCING: 'The index is catching up', INVALID_ACCOUNT: 'Not a full address or account ID', NOT_FOUND: 'Not found', ACCOUNT_NOT_FOUND: 'No account found' };
 const failure = (status, code) => Object.assign(new Error(WORDS[code] ?? (status >= 400 && status < 500 ? 'This request was not accepted' : 'Data service unavailable')), { status, code });
 
 // A page opening takes the last answer there is, up to 10 minutes old, in place of a
