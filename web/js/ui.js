@@ -158,7 +158,7 @@ export const bpsCell = v => (num(v) === null ? DASH : `<span class="${signClass(
 // PnL per $ traded means little on a few dollars of volume (a $100 gain on $10
 // traded reads as +100,000 bps), so under $1K it shows a dash.
 export const RATIO_MIN_VOLUME = 1000;
-export const ratioCell = (v, volume) => (num(volume) !== null && num(volume) >= RATIO_MIN_VOLUME ? bpsCell(v) : '<span class="dash" title="Shown from $1K of volume in the window">—</span>');
+export const ratioCell = (v, volume) => (num(volume) !== null && num(volume) >= RATIO_MIN_VOLUME ? bpsCell(v) : '<span class="dash" title="Shown from $1K of volume in the period">—</span>');
 export const skeleton = (rows = 6) => `<div class="panel-body">${Array.from({ length: rows }, (_, i) => `<div class="skeleton sk-line" style="width:${92 - (i % 3) * 14}%"></div>`).join('')}</div>`;
 // Fills the .chart it sits in, whatever that chart's height (styles.css).
 export const skChart = () => '<div class="skeleton sk-block"></div>';
@@ -304,11 +304,15 @@ function patchKids(a, b) {
   }
   while (x) { const n = x.nextSibling; x.remove(); x = n; }
 }
+// A skeleton or a failed panel is not patched: the answer takes the region whole. Matched
+// by position, one of its nodes would become the table's wrapper, and an off-screen node
+// turning into a table counts as a layout shift.
+const PLACEHOLDER = ':scope > .sk-rows, :scope > .skeleton, :scope > .panel-error';
 export function morph(node, html) {
   if (!node || node.__chart) return;
   const t = document.createElement('template');
   t.innerHTML = html;
-  patchKids(node, t.content);
+  if (node.querySelector(PLACEHOLDER)) node.replaceChildren(t.content); else patchKids(node, t.content);
 }
 
 // A panel that could not load: one line and Retry, at the height the panel had. The
@@ -354,7 +358,7 @@ export function fitRows(el, { headH = 34, rowH = 38 } = {}) {
   const fit = () => {
     el.style.maxHeight = '';
     const h = el.getBoundingClientRect().height;
-    if (h > headH + rowH) el.style.maxHeight = `${headH + Math.floor((h - headH) / rowH) * rowH}px`;
+    if (h > headH + rowH) el.style.maxHeight = `${headH + Math.floor((h - headH + 0.5) / rowH) * rowH}px`;
   };
   const watcher = new ResizeObserver(fit);
   watcher.observe(panel);
