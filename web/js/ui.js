@@ -1,7 +1,8 @@
 // Small UI components rendered as HTML strings (every dynamic value goes
 // through esc) plus the watchlist store, market colour assignment and the
 // sideways-scrolling nav and tab strips.
-import { esc, short, num, usd, pct, bps, deltaHtml, signClass } from './format.js';
+import { get } from './api.js';
+import { esc, short, num, usd, usdShort, usdFull, pct, bps, deltaHtml, signClass } from './format.js';
 
 export const ICON = {
   cube: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l5.4 3.1v6.2L8 14.2l-5.4-3.1V4.9z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M2.6 4.9L8 8l5.4-3.1M8 8v6.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
@@ -65,6 +66,8 @@ export const logo = (id, symbol, size = 16) => {
 };
 
 // --- components ---------------------------------------------------------------------
+// An empty cell. Quieter than any word, so it never reads as a value.
+export const DASH = '<span class="dash">—</span>';
 // `link` makes the cell open the market page (for views that are not the market itself).
 export const mkt = (id, symbol, name = null, { link = false } = {}) => {
   const inner = `${logo(id, symbol)}${esc(symbol ?? `#${id}`)}${name ? ` <span class="nm">${esc(name)}</span>` : ''}`;
@@ -77,30 +80,61 @@ export function fundingTip(intervalSeconds) {
   const every = s > 0 ? `about every ${s >= 5400 ? `${(s / 3600).toFixed(1)} h` : `${Math.round(s / 60)} min`}` : 'on a fixed block schedule';
   return `Funding settles ${every}; shown as the rate for 8 hours and for a year (APR).`;
 }
-export const sideTag = side => { const s = String(side ?? '').toLowerCase(); return s === 'long' || s === 'short' ? `<span class="side ${s}">${s === 'long' ? 'LONG' : 'SHORT'}</span>` : '<span class="faint">—</span>'; };
-export function addr(address, account, { star = true } = {}) {
+export const sideTag = side => { const s = String(side ?? '').toLowerCase(); return s === 'long' || s === 'short' ? `<span class="side ${s}">${s === 'long' ? 'LONG' : 'SHORT'}</span>` : DASH; };
+// after: HTML printed after the icons, inside the same line (a trader's tags).
+export function addr(address, account, { star = true, after = '' } = {}) {
   const key = address || String(account ?? '');
-  if (!key) return '<span class="faint">—</span>';
+  if (!key) return DASH;
   const label = address ? short(address) : `#${esc(account)}`;
-  return `<span class="addr"><a href="/wallet/${esc(key)}" title="${esc(address || `Account ${account}`)}">${label}</a>${address ? `<button class="icon-btn" data-copy="${esc(address)}" title="Copy address">${ICON.copy}</button>` : ''}${star ? `<button class="icon-btn ${watch.has(key) ? 'on' : ''}" data-watch="${esc(key)}" title="Watch wallet">${watch.has(key) ? ICON.star : ICON.starOff}</button>` : ''}</span>`;
+  return `<span class="addr"><a href="/wallet/${esc(key)}" title="${esc(address || `Account ${account}`)}">${label}</a>${address ? `<button class="icon-btn" data-copy="${esc(address)}" title="Copy address">${ICON.copy}</button>` : ''}${star ? `<button class="icon-btn ${watch.has(key) ? 'on' : ''}" data-watch="${esc(key)}" title="Watch wallet">${watch.has(key) ? ICON.star : ICON.starOff}</button>` : ''}${after}</span>`;
 }
+// A line of small print: each part between " · " becomes a piece of .dotline (styles.css),
+// so a wrapped line neither starts nor ends on a dot. Takes HTML and splits only
+// outside tags, so a dot inside a span or a note stays where it is. `after` goes
+// at the end of the last part (an info tip follows the last word).
+const VOID_TAG = /^<(?:img|br|hr|input)\b/i;
+function dotParts(html) {
+  const parts = [];
+  let depth = 0, from = 0;
+  for (const m of html.matchAll(/<[^>]*>| · /g)) {
+    const t = m[0];
+    if (t === ' · ') { if (!depth) { parts.push(html.slice(from, m.index)); from = m.index + t.length; } } else if (t[1] === '/') depth--; else if (!t.endsWith('/>') && !VOID_TAG.test(t)) depth++;
+  }
+  parts.push(html.slice(from));
+  return parts;
+}
+export function keepDots(html, after = '') {
+  const parts = dotParts(String(html ?? ''));
+  if (parts.length < 2) return `${parts[0]}${after}`;
+  return `<span class="dotline">${parts.map((part, i) => `<span class="kn">${i ? '<i> · </i>' : ''}${part}${i === parts.length - 1 ? after : ''}</span>`).join('')}</span>`;
+}
+// The (i) beside a title or label: opens on hover, keyboard focus and tap.
+export const infoTip = (text, about = '') => (text ? ` <span class="info-tip" tabindex="0" aria-label="${esc(about ? `${about}: ${text}` : text)}" title="${esc(text)}">i</span>` : '');
+export { infoTip as tip };
 // basis: what the delta compares with, shown after it ("vs prev", "in 24h").
-// A " · " in the label or the note keeps to the word before it, so a wrapped line never starts with it.
-export const keepDots = html => String(html).replaceAll(' · ', '\u00a0· ');
 export function kpi({ label, value, delta = undefined, invert = false, basis = null, basisTitle = null, note = '', spark = null, tip = null, cls = '' }) {
-  return `<div class="kpi ${cls}"><div class="kpi-label">${keepDots(esc(label))}${tip ? ` <span class="info-tip" tabindex="0" title="${esc(tip)}">i</span>` : ''}</div><div class="kpi-value">${value}</div><div class="kpi-row">${delta === undefined ? '' : `${deltaHtml(delta, invert, basisTitle)}${basis ? `<span class="kpi-basis">${esc(basis)}</span>` : ''}`}<span class="kpi-note">${keepDots(note)}</span></div>${spark ? `<div class="spark" id="${esc(spark)}"></div>` : ''}</div>`;
+  return `<div class="kpi ${cls}"><div class="kpi-label">${keepDots(esc(label), infoTip(tip, label))}</div><div class="kpi-value">${value}</div><div class="kpi-row">${delta === undefined ? '' : `${deltaHtml(delta, invert, basisTitle)}${basis ? `<span class="kpi-basis">${esc(basis)}</span>` : ''}`}<span class="kpi-note">${keepDots(note)}</span></div>${spark ? `<div class="spark" id="${esc(spark)}"></div>` : ''}</div>`;
 }
-// Moves to a page of the dashboard; the router in app.js answers the popstate.
-export const go = url => { history.pushState(null, '', url); dispatchEvent(new PopStateEvent('popstate')); };
-export const seg = (name, options, active) => `<div class="seg" role="group">${options.map(([v, label]) => `<button data-seg="${esc(name)}" data-v="${esc(v)}" class="${String(v) === String(active) ? 'on' : ''}">${esc(label)}</button>`).join('')}</div>`;
-export const tabs = (name, options, active) => `<div class="tabs" role="tablist">${options.map(([v, label]) => `<button role="tab" data-tab="${esc(name)}" data-v="${esc(v)}" class="${v === active ? 'on' : ''}">${esc(label)}</button>`).join('')}</div>`;
+// Moves to a page of the dashboard; the router in app.js answers the popstate. The
+// page being left keeps its scroll position in its history entry, for Back. A link to
+// the page already open goes to its top and leaves no dead step in the history.
+export const go = url => {
+  if (url === location.pathname + location.search) { window.scrollTo({ top: 0 }); return; }
+  history.replaceState({ ...history.state, y: Math.round(scrollY) }, '');
+  history.pushState(null, '', url);
+  dispatchEvent(new PopStateEvent('popstate'));
+};
+export const seg = (name, options, active) => `<div class="seg" role="group">${options.map(([v, label]) => `<button data-seg="${esc(name)}" data-v="${esc(v)}" class="${String(v) === String(active) ? 'on' : ''}" aria-pressed="${String(v) === String(active)}">${esc(label)}</button>`).join('')}</div>`;
+export const tabs = (name, options, active) => `<div class="tabs" role="tablist">${options.map(([v, label]) => `<button role="tab" data-tab="${esc(name)}" data-v="${esc(v)}" class="${v === active ? 'on' : ''}" aria-selected="${v === active}">${esc(label)}</button>`).join('')}</div>`;
 export function ratio(long, short) {
   const l = num(long) ?? 0, s = num(short) ?? 0, t = l + s;
-  if (!t) return '<span class="faint">—</span>';
+  if (!t) return DASH;
   const lp = Math.round(l / t * 100);
   return `<div class="ratio-wrap"><div class="ratio"><i class="l" style="width:${lp}%"></i><i class="s" style="width:${100 - lp}%"></i></div><div class="lbl"><span>${lp}% L</span><span>${100 - lp}% S</span></div></div>`;
 }
-export const pnl = v => (num(v) === null ? '—' : `<span class="${signClass(v)}">${usd(v, { sign: true })}</span>`);
+export const pnl = v => (num(v) === null ? DASH : `<span class="${signClass(v)}">${usd(v, { sign: true })}</span>`);
+// A gain or loss in a table or note: the short form, with the exact amount as its note.
+export const pnlShort = v => (num(v) === null ? DASH : `<span class="${signClass(v)}" title="${esc(usdFull(v))}">${usdShort(v, { sign: true })}</span>`);
 // What the taker did, from the position event behind the fill. Colour
 // follows direction (buying is green); flips name the new side.
 const VERBS = { open: 'Open', increase: 'Add', decrease: 'Reduce', close: 'Close', invert: 'Flip to', deleverage: 'ADL', unwind: 'Unwind' };
@@ -114,38 +148,50 @@ export function tradeAction(r) {
 // Funding per 8h with its APR; a zero rate is shown quietly.
 export function fundingCell(f, { apr = true } = {}) {
   const rate = num(f?.rate_8h_pct);
-  if (rate === null) return '<span class="faint">—</span>';
+  if (rate === null) return DASH;
   if (rate === 0) return '<span class="faint" title="Zero rate: no funding payments this interval">0% · flat</span>';
   return `<span class="${signClass(rate, 4)}">${pct(rate, { digits: 4, sign: true })}</span>${apr ? `<div class="sub">${pct(f.apr_pct, { digits: 1, sign: true })} APR</div>` : ''}`;
 }
-export const pctCell = (v, sign = true) => (num(v) === null ? '<span class="faint">—</span>' : `<span class="${sign ? signClass(v) : ''}">${pct(v, { sign })}</span>`);
+export const pctCell = (v, sign = true) => (num(v) === null ? DASH : `<span class="${sign ? signClass(v) : ''}">${pct(v, { sign })}</span>`);
 // Whole basis points from 100 up, where a decimal adds nothing (+2405 bps, +25.2 bps).
-export const bpsCell = v => (num(v) === null ? '<span class="faint">—</span>' : `<span class="${signClass(v, 1)}">${bps(v, { sign: true, digits: Math.abs(num(v)) >= 100 ? 0 : 1 })}</span>`);
+export const bpsCell = v => (num(v) === null ? DASH : `<span class="${signClass(v, 1)}">${bps(v, { sign: true, digits: Math.abs(num(v)) >= 100 ? 0 : 1 })}</span>`);
 // PnL per $ traded means little on a few dollars of volume (a $100 gain on $10
 // traded reads as +100,000 bps), so under $1K it shows a dash.
 export const RATIO_MIN_VOLUME = 1000;
-export const ratioCell = (v, volume) => (num(volume) !== null && num(volume) >= RATIO_MIN_VOLUME ? bpsCell(v) : '<span class="faint" title="Shown from $1K of volume in the window">—</span>');
+export const ratioCell = (v, volume) => (num(volume) !== null && num(volume) >= RATIO_MIN_VOLUME ? bpsCell(v) : '<span class="dash" title="Shown from $1K of volume in the period">—</span>');
 export const skeleton = (rows = 6) => `<div class="panel-body">${Array.from({ length: rows }, (_, i) => `<div class="skeleton sk-line" style="width:${92 - (i % 3) * 14}%"></div>`).join('')}</div>`;
-export const skChart = () => '<div class="panel-body"><div class="skeleton sk-block"></div></div>';
+// Fills the .chart it sits in, whatever that chart's height (styles.css).
+export const skChart = () => '<div class="skeleton sk-block"></div>';
+// Skeletons at the real geometry, so nothing moves when the data lands. Rows are
+// 44 px (38 compact, 52 on a phone), the head 34; pass the phone row where it differs.
+// Rows change height at 640, grids collapse at 860.
+const onPhone = () => matchMedia('(max-width: 860px)').matches, phoneRows = () => matchMedia('(max-width: 640px)').matches;
+export const skRows = (rows, rowH = 44, head = 34, phoneRowH = rowH) => { const r = phoneRows() ? phoneRowH : rowH; return `<div class="sk-rows" style="height:${head + rows * r}px;--row:${r}px;--head:${head}px"></div>`; };
+export const skBox = (h, phone = h) => `<div class="skeleton sk-box" style="height:${onPhone() ? phone : h}px"></div>`;
+export const skKpis = (n, { spark = false, lines = 1 } = {}) => Array.from({ length: n }, () => `<div class="kpi"><div class="kpi-label"><span class="skeleton sk-in" style="width:46%"></span></div><div class="kpi-value"><span class="skeleton sk-in" style="width:64%;height:24px"></span></div><div class="kpi-row">${'<span class="kpi-note"><span class="skeleton sk-in" style="width:72%"></span></span>'.repeat(lines)}</div>${spark ? '<div class="spark"></div>' : ''}</div>`).join('');
 export const empty = text => `<div class="empty-state">${esc(text)}</div>`;
 
 // Sortable table: columns [{ key, label, n: numeric, sort: value fn, render }]
-export function table({ id, columns, rows, sortKey = null, sortDir = 'desc', rowAttrs = () => '', compact = false, emptyText = 'No data' }) {
+// Numbers are right-aligned; center: true keeps a column on its middle (a figure
+// over a bar). focusKey names the column the rows are ranked by, when that is not
+// a sort of this table; it takes the tinted band (styles.css, .col-rank).
+export function table({ id, columns, rows, sortKey = null, focusKey = sortKey, sortDir = 'desc', rowAttrs = () => '', compact = false, emptyText = 'No data' }) {
   if (!rows.length) return empty(emptyText);
   let list = rows;
   const col = columns.find(c => c.key === sortKey);
   if (col?.sort) { list = [...rows].sort((a, b) => { const x = col.sort(a), y = col.sort(b); return (x > y ? 1 : x < y ? -1 : 0) * (sortDir === 'asc' ? 1 : -1); }); }
-  // A number with a second line under it (APR under a rate, "5 liq." under an
-  // amount) is centred, header included, so both lines and the header share
-  // one axis; single-line numbers stay right-aligned for easy comparison.
   // A row { group: 'label' } is a header over the rows after it.
   const cells = list.map((r, i) => (r.group ? null : columns.map(c => c.render(r, i))));
-  const stacked = columns.map((c, j) => Boolean(c.n) && cells.some(row => row && /class="sub[\s"]/.test(row[j])));
-  const align = (c, j) => (c.center || stacked[j] ? 'c' : c.n ? 'n' : '');
+  const align = c => (c.center ? 'c' : c.n ? 'n' : '');
   // A column marked phone: false hides on phones (styles.css, .hide-sm).
   const sm = c => (c.phone === false ? ' hide-sm' : '');
-  const head = columns.map((c, j) => `<th class="${align(c, j)}${sm(c)} ${c.sort ? 'sort' : ''} ${c.key === sortKey ? 'sorted' : ''}" ${c.sort ? `data-sort="${esc(id)}:${esc(c.key)}"` : ''}${c.tip ? ` title="${esc(c.tip)}"` : ''}>${esc(c.label)}${c.key === sortKey ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}</th>`).join('');
-  const body = list.map((r, i) => (r.group ? `<tr class="grp"><td colspan="${columns.length}">${r.group}</td></tr>` : `<tr ${rowAttrs(r, i)}>${columns.map((c, j) => `<td class="${align(c, j)}${sm(c)} ${c.cls ?? ''}">${cells[i][j]}</td>`).join('')}</tr>`)).join('');
+  // A header with a note shows it by its dotted label; a sortable one takes the
+  // keyboard itself (Enter or Space sorts, the note opens on focus).
+  const label = c => (c.tip ? `<span class="th-tip"${c.sort ? '' : ' tabindex="0"'}>${esc(c.label)}</span>` : esc(c.label));
+  const sorted = c => c.key === sortKey, rank = c => (c.key === focusKey ? ' col-rank' : '');
+  const order = sortDir === 'asc' ? ['ascending', '↑'] : ['descending', '↓'];
+  const head = columns.map(c => `<th class="${align(c)}${sm(c)} ${c.sort ? 'sort' : ''} ${sorted(c) ? 'sorted' : ''}${rank(c)}"${c.sort ? ` data-sort="${esc(id)}:${esc(c.key)}" tabindex="0"` : ''}${sorted(c) ? ` aria-sort="${order[0]}"` : ''}${c.tip ? ` title="${esc(c.tip)}"` : ''}>${label(c)}${sorted(c) ? `<span class="sort-ar" aria-hidden="true">${order[1]}</span>` : ''}</th>`).join('');
+  const body = list.map((r, i) => (r.group ? `<tr class="grp"><td colspan="${columns.length}">${r.group}</td></tr>` : `<tr ${rowAttrs(r, i)}>${columns.map((c, j) => `<td class="${align(c)}${sm(c)} ${c.cls ?? ''}${rank(c)}">${cells[i][j]}</td>`).join('')}</tr>`)).join('');
   return `<div class="table-wrap"><table class="t ${compact ? 'compact' : ''}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -194,6 +240,7 @@ export function mergeByAsset(rows, fields) {
 // The current page's link, and a tab row's open tab when the row first renders,
 // are scrolled to the middle so neither sits off-screen (the edge fades are CSS).
 const nav = document.querySelector('.nav'), seen = new WeakSet();
+const STRIPS = '.table-wrap, .tabs, .nav';
 const centre = (strip, item) => { if (item && strip.scrollWidth > strip.clientWidth) strip.scrollTo({ left: strip.scrollLeft + item.getBoundingClientRect().left - strip.getBoundingClientRect().left - (strip.clientWidth - item.offsetWidth) / 2 }); };
 new MutationObserver(() => centre(nav, nav.querySelector('.active'))).observe(nav, { subtree: true, attributeFilter: ['class'] });
 new MutationObserver(() => document.querySelectorAll('.tabs').forEach(t => { if (!seen.has(t)) { seen.add(t); centre(t, t.querySelector('.on')); } })).observe(document.getElementById('view'), { childList: true, subtree: true });
@@ -204,21 +251,148 @@ window.addEventListener('resize', () => { if (innerWidth !== width) { width = in
 // here: how far each strip hides at either edge, up to 40px, on every scroll and
 // once a frame after the page or the window changes.
 if (!CSS.supports('animation-timeline: scroll()')) {
-  const STRIPS = '.table-wrap, .tabs, .nav';
   const fade = s => { const past = s.scrollWidth - s.clientWidth - s.scrollLeft; s.style.setProperty('--fade-l', `${Math.min(40, Math.max(0, s.scrollLeft))}px`); s.style.setProperty('--fade-r', `${Math.min(40, Math.max(0, past))}px`); };
   let queued = false;
   const soon = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; document.querySelectorAll(STRIPS).forEach(fade); }); };
   document.addEventListener('scroll', e => { if (e.target.matches?.(STRIPS)) fade(e.target); }, true);
   window.addEventListener('resize', soon);
-  new MutationObserver(soon).observe(document.getElementById('view'), { childList: true, subtree: true });
+  new MutationObserver(soon).observe(document.getElementById('view'), { childList: true, subtree: true, characterData: true });
   soon();
+}
+
+// --- regions that wait, fail and refresh -------------------------------------------------
+// Keeps a region's content and height while its next data is on the way: the press
+// shows at once and the page does not move. Returns the release; the latest press
+// owns the hold, so an older press finishing late does not undim a newer one.
+export function hold(node) {
+  if (!node) return () => {};
+  const mine = node.__hold = {};
+  node.style.minHeight = `${node.offsetHeight}px`;
+  node.classList.add('is-stale'); node.setAttribute('aria-busy', 'true');
+  return () => { if (node.__hold !== mine) return; node.__hold = null; node.classList.remove('is-stale'); node.removeAttribute('aria-busy'); node.style.minHeight = ''; };
+}
+
+// Writes new HTML into a region by patching what differs: scroll, focus, an open
+// note and a press in progress all survive a refresh. A row under the pointer keeps
+// its target until release, so a click never lands on the row that moved up.
+let pressedRow = null;
+document.addEventListener('pointerdown', e => { pressedRow = e.target.closest?.('tr') ?? null; }, true);
+const released = () => setTimeout(() => { pressedRow = null; }, 0);
+document.addEventListener('pointerup', released, true);
+document.addEventListener('pointercancel', released, true);
+function patchAttrs(a, b) {
+  const strip = a.matches(STRIPS); // before the class changes: a skeleton turning into a table wrapper has no fades to keep
+  for (const { name, value } of b.attributes) {
+    if (name === 'title' && a.hasAttribute('data-tip')) { a.dataset.tip = value; continue; } // the hover note took the title
+    if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+  }
+  for (const { name } of [...a.attributes]) {
+    if (b.hasAttribute(name) || (name === 'data-tip' && b.hasAttribute('title'))) continue;
+    if (name === 'style' && strip) continue; // the edge fades live here (Firefox)
+    a.removeAttribute(name);
+  }
+}
+function patchKids(a, b) {
+  let x = a.firstChild, y = b.firstChild;
+  while (y) {
+    const nextY = y.nextSibling;
+    if (!x) a.append(y);
+    else if (x === pressedRow) x = x.nextSibling;
+    else if (x.nodeType !== y.nodeType || x.nodeName !== y.nodeName || y.classList?.contains('flash') || (x.__chart && x.id !== y.id)) { const nextX = x.nextSibling; a.replaceChild(y, x); x = nextX; }
+    else { if (x.nodeType !== 1) { if (x.nodeValue !== y.nodeValue) x.nodeValue = y.nodeValue; } else if (!x.__chart) { patchAttrs(x, y); patchKids(x, y); } x = x.nextSibling; }
+    y = nextY;
+  }
+  while (x) { const n = x.nextSibling; x.remove(); x = n; }
+}
+// A skeleton or a failed panel is not patched: the answer takes the region whole. Matched
+// by position, one of its nodes would become the table's wrapper, and an off-screen node
+// turning into a table counts as a layout shift.
+const PLACEHOLDER = ':scope > .sk-rows, :scope > .skeleton, :scope > .panel-error';
+export function morph(node, html) {
+  if (!node || node.__chart) return;
+  const t = document.createElement('template');
+  t.innerHTML = html;
+  if (node.querySelector(PLACEHOLDER)) node.replaceChildren(t.content); else patchKids(node, t.content);
+}
+
+// A panel that could not load: one line and Retry, at the height the panel had. The
+// next render writes over it, height included. Does nothing once the view has gone.
+export function panelError(node, message = 'Could not load this view.', retry = null) {
+  if (!node?.isConnected) return;
+  const on = node.firstElementChild;
+  if (on?.matches('.panel-error') && on.dataset.message === message) return; // already says so; a Retry in hand stays
+  const css = getComputedStyle(node);
+  const h = Math.max(0, node.clientHeight - parseFloat(css.paddingTop) - parseFloat(css.paddingBottom));
+  node.innerHTML = `<div class="panel-error" role="status" data-message="${esc(message)}" style="min-height:${Math.round(h)}px"><span class="status-dot warn"></span><span>${esc(message)}</span>${retry ? '<button class="btn ghost" type="button" data-retry>Retry</button>' : ''}</div>`;
+  node.querySelector('[data-retry]')?.addEventListener('click', e => {
+    const button = e.currentTarget;
+    button.disabled = true;
+    Promise.resolve().then(retry).catch(() => {}).finally(() => { button.disabled = false; });
+  });
+}
+
+// Runs a loader until it works: after a failure it waits 3 s, 6 s, 12 s, then 20 s
+// each time. alive says the view is still open; fail shows the failure. Returns a
+// stop for the view's destroy(), and writes nothing after that.
+export function keepTrying(load, { alive = () => true, fail = () => {} } = {}) {
+  let wait = 3000, timer = null, stopped = false;
+  const live = () => !stopped && alive();
+  const run = async () => {
+    if (!live()) return;
+    try { await load(); } catch (e) {
+      if (!live()) return;
+      fail(e);
+      timer = setTimeout(run, wait);
+      wait = Math.min(wait * 2, 20000);
+    }
+  };
+  run();
+  return () => { stopped = true; clearTimeout(timer); };
+}
+
+// A list that fills its panel shows whole rows, so no row is cut at the panel's foot.
+// Call once when the view opens; returns a stop for destroy().
+export function fitRows(el, { headH = 34, rowH = 38 } = {}) {
+  const panel = el?.parentElement;
+  if (!panel) return () => {};
+  const fit = () => {
+    el.style.maxHeight = '';
+    const h = el.getBoundingClientRect().height;
+    if (h > headH + rowH) el.style.maxHeight = `${headH + Math.floor((h - headH + 0.5) / rowH) * rowH}px`;
+  };
+  const watcher = new ResizeObserver(fit);
+  watcher.observe(panel);
+  fit();
+  return () => watcher.disconnect();
+}
+
+// Turns what someone typed into a wallet: a full address, an account ID (#1767), an
+// address prefix, or an address as the site prints it (0x471b…8ffd). key opens a
+// wallet when the text names one, rows are the matches, note says why there are none.
+// An unreachable API throws, except for a full address or an ID, which need no lookup.
+const CUT_ADDRESS = /^(0x[0-9a-f]{3,38})(?:…|\.{2,3})([0-9a-f]{1,38})$/i;
+export async function resolveWallet(text) {
+  const q = String(text ?? '').trim().replace(/^#/, '');
+  const none = note => ({ key: null, rows: [], note });
+  if (!q) return none('');
+  const cut = q.match(CUT_ADDRESS), exact = /^(0x[0-9a-f]{40}|\d{1,9})$/i.test(q);
+  if (!cut && !exact) {
+    if (!/^0x[0-9a-f]{0,40}$/i.test(q)) return none('Enter a 0x address (or prefix) or an account ID');
+    if (q.length < 5) return none('Keep typing: at least 3 hex digits');
+  }
+  const found = await get(`search?q=${encodeURIComponent(cut?.[1] ?? q)}`, { maxAge: 10000 }).catch(e => { if (exact) return null; throw e; });
+  if (!found) return { key: q, rows: [], note: '' };
+  const end = cut?.[2].toLowerCase();
+  const rows = end ? found.rows.filter(r => r.address.toLowerCase().endsWith(end)) : found.rows;
+  return { key: exact ? q : rows.length === 1 ? rows[0].address : null, rows, note: rows.length ? '' : 'No Perpl account found' };
 }
 
 // --- hover notes ------------------------------------------------------------------------
 // Every title="" on the site shows in one styled note instead of the browser's
 // plain box: on first hover the attribute moves to data-tip, so the native one
-// never opens. An (i) also opens on tap, for touch screens.
+// never opens. An (i), a column head and a tag also open on tap, for touch screens.
 if (typeof document !== 'undefined') {
+  document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('th[data-sort]')) { e.preventDefault(); e.target.click(); } }); // a sortable header works from the keyboard
   const pop = Object.assign(document.createElement('div'), { className: 'tip-pop', hidden: true });
   pop.setAttribute('role', 'tooltip');
   document.body.append(pop);
@@ -226,7 +400,8 @@ if (typeof document !== 'undefined') {
   const place = el => {
     const r = el.getBoundingClientRect(), p = pop.getBoundingClientRect(), gap = 8;
     const above = r.top - p.height - gap >= 8;
-    const left = Math.min(window.innerWidth - p.width - 8, Math.max(8, r.left + r.width / 2 - p.width / 2));
+    // clientWidth, not innerWidth: the note stays clear of the scrollbar.
+    const left = Math.min(document.documentElement.clientWidth - p.width - 8, Math.max(8, r.left + r.width / 2 - p.width / 2));
     pop.style.transform = `translate(${Math.round(left)}px, ${Math.round(above ? r.top - p.height - gap : r.bottom + gap)}px)`;
   };
   const show = el => {
@@ -236,12 +411,19 @@ if (typeof document !== 'undefined') {
   };
   const hide = () => { on = null; pop.hidden = true; };
   const noted = t => t?.closest?.('[title]:not([title=""]), [data-tip]:not([data-tip=""])');
+  const mouse = matchMedia('(hover: hover)');
   document.addEventListener('mouseover', e => { const el = noted(e.target); if (el && el !== on) show(el); else if (!el && on) hide(); });
   document.addEventListener('mouseout', e => { if (!e.relatedTarget) hide(); });
-  document.addEventListener('focusin', e => { const el = noted(e.target); if (el) show(el); });
-  document.addEventListener('focusout', hide);
-  // A tap on (i) toggles its note (the tap's own mouseover has just opened it); a tap elsewhere closes it.
-  document.addEventListener('click', e => { const el = e.target.closest?.('.info-tip'); if (el) { if (on === el && Date.now() - shownAt > 400) hide(); else show(el); } else if (on) hide(); });
+  // Focus moving on leaves no note behind whose element a re-render has taken.
+  document.addEventListener('focusin', e => { const el = noted(e.target); if (el) show(el); else if (on && !on.isConnected) hide(); });
+  // relatedTarget: on a touch screen a tap that re-renders what it hit drops focus to
+  // nothing, and must not close its note. With a mouse or keys the note goes with its element.
+  document.addEventListener('focusout', e => { if (e.relatedTarget || (mouse.matches && on?.contains(e.target))) hide(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
+  // A tap on one of these toggles its note (the tap's own mouseover has just opened it);
+  // a tap anywhere but on the open note's element closes it.
+  const TAP = '.info-tip, th[title], th[data-tip], .tag[title], .tag[data-tip], .rank-pill, .co-pill';
+  document.addEventListener('click', e => { const el = e.target.closest?.(TAP); if (el) { if (on === el && Date.now() - shownAt > 400) hide(); else show(el); } else if (on && noted(e.target) !== on) hide(); });
   window.addEventListener('scroll', hide, true);
   window.addEventListener('popstate', hide);
 }

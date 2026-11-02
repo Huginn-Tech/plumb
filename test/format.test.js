@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compact, usd, usdFull, pct, bps, share, price, short, signClass, deltaHtml, duration, epochLeft } from '../web/js/format.js';
+import { compact, usd, usdFull, usdShort, pct, bps, share, price, dpOf, short, signClass, deltaHtml, duration, epochLeft } from '../web/js/format.js';
 
 test('compact amounts switch unit on the rounded figure', () => {
   assert.equal(usd(999.4), '$999');
@@ -27,6 +27,20 @@ test('amounts under a cent show a floor without a sign', () => {
   assert.equal(usdFull(-1234.5), '-$1,234.50');
 });
 
+test('table amounts keep one precision a column', () => {
+  assert.equal(usdShort(9.99), '$9.99');
+  assert.equal(usdShort(9.998), '$10');
+  assert.equal(usdShort(14.86), '$15');
+  assert.equal(usdShort(999.4), '$999');
+  assert.equal(usdShort(999.7), '$1.0K');
+  assert.equal(usdShort(1330, { sign: true }), '+$1.3K');
+  assert.equal(usdShort(-1330), '-$1.3K');
+  assert.equal(usdShort(0.004), '<$0.01');
+  assert.equal(usdShort(-0.004, { sign: true }), '<$0.01');
+  assert.equal(usdShort(0), '$0');
+  assert.equal(usdShort(null), '—');
+});
+
 test('a percentage that rounds to zero is 0 and neutral', () => {
   assert.equal(pct(-0.004), '0.00%');
   assert.equal(pct(0.004, { sign: true }), '0.00%');
@@ -49,6 +63,9 @@ test('a share too small for a decimal is <0.1%, and none is 0%', () => {
   assert.equal(share(0), '0%');
   assert.equal(share(12.34), '12.3%');
   assert.equal(share(null), '—');
+  assert.equal(share(0.03, { digits: 2 }), '0.03%');
+  assert.equal(share(0.004, { digits: 2 }), '<0.01%');
+  assert.equal(share(0, { digits: 2 }), '0%');
 });
 
 test('prices write out their decimals so a column lines up', () => {
@@ -57,6 +74,19 @@ test('prices write out their decimals so a column lines up', () => {
   assert.equal(price(75.28), '75.280');
   assert.equal(price(82741.35), '82,741.4');
   assert.equal(price(0.00461691), '0.0046169');
+});
+
+test('a price takes the decimals of its market when it is given them', () => {
+  assert.equal(price(0.019357, 6), '0.019357');
+  assert.equal(price('2249.80', dpOf('2249.80')), '2,249.80');
+  assert.equal(price(83922.7697662, dpOf('77437.1')), '83,922.8');
+  assert.equal(price(null, dpOf(null)), '—');
+  assert.equal(dpOf('0.019214'), 6);
+  assert.equal(dpOf(2249.8), null);
+});
+
+test('price as a map callback does not take the index for decimals', () => {
+  assert.deepEqual([0.029, 75.28].map(price), ['0.02900', '75.280']);
 });
 
 test('short keys are shown whole, addresses shortened', () => {

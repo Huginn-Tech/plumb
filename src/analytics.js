@@ -202,7 +202,9 @@ export function insights(perf, events, { symbol = id => `#${id}` } = {}) {
   const pct = x => `${Math.round(x * 100)}%`;
   // One unit per range, so two holds read alike ("1.7m vs 4m", not "103s vs 4m").
   const one = x => (x < 10 ? x.toFixed(1).replace(/.0$/, '') : String(Math.round(x)));
-  const dur = s => (s < 60 ? `${Math.round(s)}s` : s < 3600 ? `${one(s / 60)}m` : s < 172800 ? `${one(s / 3600)}h` : `${Math.round(s / 86400)}d`);
+  const dur = s => (s < 60 ? `${Math.round(s)}s` : s < 3600 ? `${one(s / 60)}m` : s < 86400 ? `${one(s / 3600)}h` : `${one(s / 86400)}d`);
+  // The word beside the figure: wins 43% above losses are not break-even.
+  const verdict = pf => (pf >= 1.5 ? 'Profitable' : pf >= 1.1 ? 'Slightly profitable' : pf >= 0.9 ? 'Around break-even' : 'Net losing');
   if (perf.long.trips + perf.short.trips >= 5) {
     const share = perf.long.trips / (perf.long.trips + perf.short.trips);
     if (share >= 0.7) out.push({ tag: 'bias', text: `Long bias: ${pct(share)} of round trips are longs.` });
@@ -215,7 +217,7 @@ export function insights(perf, events, { symbol = id => `#${id}` } = {}) {
     out.push({ tag: 'discipline', text: `Holds losers longer than winners (median ${dur(perf.medianLossHold)} vs ${dur(perf.medianWinHold)}).` });
   if (perf.averageWin !== null && perf.averageLoss !== null && perf.averageLoss > perf.averageWin * 2n && perf.winRate !== null && perf.winRate > 0.5)
     out.push({ tag: 'risk', text: 'High win rate but average loss is more than twice the average win.' });
-  if (perf.profitFactor !== null) out.push({ tag: 'result', text: perf.profitFactor >= 1.5 ? `Profitable: profit factor ${perf.profitFactor.toFixed(2)}.` : perf.profitFactor < 1 ? `Net losing: profit factor ${perf.profitFactor.toFixed(2)}.` : `Around break-even: profit factor ${perf.profitFactor.toFixed(2)}.` });
+  if (perf.profitFactor !== null) { const pf = perf.profitFactor.toFixed(2); out.push({ tag: 'result', text: `${verdict(Number(pf))}: profit factor ${pf}.` }); }
   if (perf.bestMarket && perf.worstMarket && perf.bestMarket.net > 0n && perf.worstMarket.net < 0n) out.push({ tag: 'markets', text: `Best market ${symbol(perf.bestMarket.market)}, worst ${symbol(perf.worstMarket.market)}.` });
   if (perf.liquidatedTrips) out.push({ tag: 'risk', text: `${perf.liquidatedTrips} of ${perf.closedTrips} round trips ended in liquidation.` });
   if (perf.worstStreak >= 5) out.push({ tag: 'streak', text: `Longest losing streak: ${perf.worstStreak} trips in a row.` });

@@ -1,12 +1,18 @@
 // Side-by-side comparison of up to five wallets: key metrics in columns and
 // their cumulative net PnL on one chart (each wallet keeps its colour).
 import { get } from '../api.js';
-import { usd, int, pct, num, esc, short, duration, date } from '../format.js';
-import { pnl, empty, skeleton, ICON, SLOT_HEX, watch, chartTools } from '../ui.js';
-import { lineChart, sparkline } from '../charts.js';
+import { usd, usdShort, usdFull, int, pct, num, esc, short, duration, date } from '../format.js';
+import { pnl, pnlShort, empty, skChart, skRows, ICON, SLOT_HEX, watch, chartTools, toast, hold, morph, panelError, keepTrying, keepDots, infoTip, resolveWallet, DASH } from '../ui.js';
+import { lineChart, sparkline, dropZoom } from '../charts.js';
 
 // Wallet errors from the API, in words.
 const ERRORS = { INVALID_ACCOUNT: 'not a full address or account ID', NOT_FOUND: 'no Perpl account', ACCOUNT_NOT_FOUND: 'no Perpl account' };
+const TIP = {
+  win: 'Winning round trips as a share of closed round trips',
+  factor: 'Gross profit divided by gross loss on closed round trips. Above 1 is net positive.',
+  drawdown: 'Largest fall from a peak of cumulative net PnL, in round-trip order',
+  flow: 'Deposits minus withdrawals, all-time'
+};
 
 const COLORS = [SLOT_HEX[0], SLOT_HEX[1], SLOT_HEX[2], SLOT_HEX[3], SLOT_HEX[4]];
 // A wallet keeps its colour while it stays on the page, so removing one does not
@@ -22,94 +28,162 @@ function colourKeys(keys) {
   return k => COLORS[slots[k]];
 }
 
-export function mount(el, { query, navigate }) {
-  let keys = (query.get('w') ?? '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 5);
-  let alive = true;
+const parse = q => (q.get('w') ?? '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 5);
+// A table amount: the short form, with the exact figure as its note.
+const amount = (v, sign = false) => (num(v) === null ? DASH : `<span title="${esc(usdFull(v))}">${usdShort(v, { sign })}</span>`);
+const count = (n, one, many) => `${int(n)} ${n === 1 ? one : many}`;
+// The table before its answer, at its real size: 24 metrics under a head that names the
+// wallets. Phones stack it: each wallet a line of the head, each metric its label over
+// its values, on two rows for four or five wallets (ux-tools/stab-sizes.cjs).
+const skTable = n => skRows(24, 38, matchMedia('(max-width: 640px)').matches ? 18 + 33 * n : 59, n > 3 ? 82 : n === 3 ? 59.4 : 58);
+// A wallet's card before its answer: the real card, so it takes its real size at every width.
+const skCard = (key, colour) => `<article class="cmp-card" style="--c:${colour}"><header><i class="cmp-dot"></i><span class="mono">${esc(short(key))}</span><button class="icon-btn" type="button" tabindex="-1" style="visibility:hidden" aria-hidden="true">${ICON.x}</button></header><div class="cmp-big"><span class="skeleton sk-in" style="width:130px;height:28px"></span></div><div class="cmp-cap">Net PnL, all-time</div><div class="cmp-spark"></div><dl class="cmp-facts">${['Account value', 'Win rate', 'Open positions'].map(t => `<div><dt>${t}</dt><dd><span class="skeleton sk-in" style="width:60%"></span></dd></div>`).join('')}</dl></article>`;
+// A region that held a skeleton or a message takes the page's first answer whole; after
+// that it is patched, so what the reader has selected or focused stays.
+const fill = (node, html) => { if (node.firstElementChild?.matches('.sk-rows, .panel-error')) node.innerHTML = html; else morph(node, html); };
+
+export function mount(el, { query, setQuery }) {
+  let keys = parse(query), alive = true, seq = 0, holds = null, stop = null, drawn = false;
   el.innerHTML = `
     <div class="page-head"><div><h1>Compare wallets</h1><div class="sub">Up to five wallets side by side. Add from any wallet page or paste addresses.</div></div>
       <form id="add" style="display:flex;gap:8px;flex:0 1 440px;min-width:0"><div class="search" style="margin:0;flex:1;max-width:none"><input id="add-input" placeholder="Add address or account ID" autocomplete="off" spellcheck="false"></div><button class="btn primary" type="submit">${ICON.plus} Add</button></form></div>
     <div class="stack"><section class="cmp-cards" id="cards" hidden></section>
-    <section class="panel trend cmp-chart"><div class="panel-head"><div class="trend-id"><h2>Cumulative net PnL <span class="info-tip" title="Realized PnL after fees, funding included, summed by UTC day from each wallet's first trade">i</span></h2></div><div class="trend-side"><div class="trend-ctl">${chartTools('chart', 'compare-pnl')}</div><div class="legend dots" id="legend"></div></div></div><div class="panel-body"><div class="chart" id="chart"></div></div></section>
-    <section class="panel" id="table">${skeleton(10)}</section></div>`;
+    <section class="panel trend cmp-chart" id="chart-panel"><div class="panel-head"><div class="trend-id"><h2>Cumulative net PnL${infoTip('Realized PnL after fees, funding included, summed by UTC day from each wallet\'s first trade', 'Cumulative net PnL')}</h2></div><div class="trend-side"><div class="trend-ctl">${chartTools('chart', 'compare-pnl')}</div><div class="legend dots" id="legend"></div></div></div><div class="panel-body"><div class="chart" id="chart"></div></div></section>
+    <section class="panel" id="table"></section></div>`;
   const $ = s => el.querySelector(`#${s}`);
   const save = () => { try { sessionStorage.setItem('ps.compare', JSON.stringify(keys)); } catch { /* storage unavailable */ } };
+  const letGo = () => { for (const release of Object.values(holds ?? {})) release(); holds = null; };
 
-  async function load() {
-    if (!keys.length) {
-      const suggested = watch.list().slice(0, 5).map(w => w.key);
-      $('table').innerHTML = empty(suggested.length ? 'No wallets selected. Your watchlist is below.' : 'No wallets selected. Add an address above or use Compare on a wallet page.');
-      if (suggested.length) $('table').innerHTML += `<div class="panel-foot"><span>Watchlist: ${suggested.map(k => `<a href="/compare?w=${esc(k)}">${esc(short(k))}</a>`).join(' · ')}</span><button class="btn" data-action="all-watch">Compare watchlist</button></div>`;
-      $('chart').innerHTML = ''; $('chart').closest('.panel').hidden = true;
-      return;
-    }
-    const r = await get(`compare?wallets=${keys.map(encodeURIComponent).join(',')}`, { maxAge: 5000 });
-    if (!alive) return;
-    const ws = r.wallets, colour = colourKeys(ws.map(w => w.key));
-    $('chart').closest('.panel').hidden = false;
+  // The page in its real shape, for wallets not on screen yet.
+  function waiting() {
+    drawn = false;
+    $('cards').hidden = false; $('cards').style.setProperty('--n', keys.length);
+    const colour = colourKeys(keys);
+    $('cards').innerHTML = keys.map(k => skCard(k, colour(k))).join('');
+    $('chart-panel').hidden = false;
+    $('chart').innerHTML = skChart();
+    $('legend').innerHTML = keys.map(k => `<span><i style="background:${colour(k)}"></i>${esc(short(k))}</span>`).join('');
+    $('table').classList.remove('cmp-fail');
+    $('table').innerHTML = skTable(keys.length);
+  }
+  function nothing() {
+    stop?.(); seq++; letGo(); drawn = false;
+    const suggested = watch.list().slice(0, 5).map(w => w.key);
+    $('cards').hidden = true;
+    $('chart').innerHTML = ''; $('chart-panel').hidden = true;
+    $('table').classList.remove('cmp-fail');
+    $('table').innerHTML = empty(suggested.length ? 'No wallets selected. Your watchlist is below.' : 'No wallets selected. Add an address above or use Compare on a wallet page.')
+      + (suggested.length ? `<div class="panel-foot"><span>Watchlist: ${suggested.map(k => `<a href="/compare?w=${esc(k)}">${esc(short(k))}</a>`).join(' · ')}</span><button class="btn" data-action="all-watch">Compare watchlist</button></div>` : '');
+  }
+  // Nothing to compare yet: one line and Retry, with the two panels that need the answer out of the way.
+  function failed() {
+    letGo(); drawn = false;
+    $('cards').hidden = true; $('chart-panel').hidden = true;
+    const box = $('table');
+    if (!box.querySelector('.panel-error')) { box.replaceChildren(); box.classList.add('cmp-fail'); }
+    panelError(box, 'Could not load these wallets.', () => load());
+  }
+
+  async function load({ fresh = false } = {}) {
+    const asked = ++seq, current = () => alive && asked === seq;
+    let r;
+    try { r = await get(`compare?wallets=${keys.map(encodeURIComponent).join(',')}`, { maxAge: fresh ? 0 : 5000 }); } catch (error) { if (current()) throw error; return; }
+    if (!current()) return;
+    const ws = r.wallets, colour = colourKeys(ws.map(w => w.key)), found = ws.filter(w => !w.error);
     // Each wallet keeps its colour: a dot in its header, on each of its values on phones, and its chart line.
-    const remove = w => `<button class="icon-btn" data-action="remove" data-key="${esc(w.key)}" title="Remove">${ICON.x}</button>`;
-    const col = w => w.error ? `<th class="n"><span class="cmp-w"><span class="neg">${esc(short(w.key))}</span>${remove(w)}</span><div class="sub">${esc(ERRORS[w.error] ?? 'not found')}</div></th>` : `<th class="n" style="--c:${colour(w.key)}"><span class="cmp-w"><i></i><a class="mono" href="/wallet/${esc(w.account.address)}">${esc(short(w.account.address))}</a>${remove(w)}</span><div class="sub">#${esc(w.account.id)}</div></th>`;
+    const remove = w => `<button class="icon-btn" data-action="remove" data-key="${esc(w.key)}" title="Remove" aria-label="Remove ${esc(short(w.key))}">${ICON.x}</button>`;
+    const col = w => (w.error ? `<th class="n"><span class="cmp-w"><span class="status-dot warn"></span><span class="muted">${esc(short(w.key))}</span>${remove(w)}</span><div class="sub">${esc(ERRORS[w.error] ?? 'not found')}</div></th>` : `<th class="n" style="--c:${colour(w.key)}"><span class="cmp-w"><i></i><a class="mono" href="/wallet/${esc(w.account.address)}">${esc(short(w.account.address))}</a>${remove(w)}</span><div class="sub">#${esc(w.account.id)}</div></th>`);
     const rows = [
       ['Account value', w => usd(w.portfolio?.account_value)],
       ['Open positions', w => int(w.positions?.length ?? 0)],
-      ['Unrealized PnL', w => pnl(w.portfolio?.unrealized_pnl)],
-      ['Net PnL (all-time)', w => pnl(w.summary.net_pnl), ['max', w => num(w.summary.net_pnl)]],
-      ['Realized PnL', w => pnl(w.summary.realized), ['max', w => num(w.summary.realized)]],
-      ['Fees paid', w => usd(w.summary.fees)],
-      ['Volume', w => usd(w.summary.volume)],
+      ['Unrealized PnL', w => pnlShort(w.portfolio?.unrealized_pnl)],
+      ['Net PnL (all-time)', w => pnlShort(w.summary.net_pnl), ['max', w => num(w.summary.net_pnl)]],
+      ['Realized PnL', w => pnlShort(w.summary.realized), ['max', w => num(w.summary.realized)]],
+      ['Fees paid', w => amount(w.summary.fees)],
+      ['Volume', w => amount(w.summary.volume)],
       ['Trades', w => int(w.summary.trades)],
       ['Maker share', w => pct(w.summary.maker_share_pct, { digits: 0 })],
       // Round-trip rows follow: where a long history is cut, say from when, right above them.
       ...(ws.some(w => !w.error && w.performance?.based_on?.truncated) ? [['Round trips from', w => (w.performance?.based_on?.truncated ? `<span class="cmp-since" title="${int(w.performance.based_on.events)} of ${int(w.performance.based_on.total_events)} events">since ${w.performance.based_on.since ? date(w.performance.based_on.since) : '—'}</span>` : '<span class="faint">full history</span>')]] : []),
-      ['Win rate', w => (w.performance.win_rate_pct === null ? '—' : pct(w.performance.win_rate_pct, { digits: 1 })), ['max', w => w.performance.win_rate_pct]],
-      ['Profit factor', w => (w.performance.profit_factor === null ? '—' : w.performance.profit_factor.toFixed(2)), ['max', w => w.performance.profit_factor]],
+      [`Win rate${infoTip(TIP.win, 'Win rate')}`, w => (w.performance.win_rate_pct === null ? DASH : pct(w.performance.win_rate_pct, { digits: 1 })), ['max', w => w.performance.win_rate_pct]],
+      [`Profit factor${infoTip(TIP.factor, 'Profit factor')}`, w => (w.performance.profit_factor === null ? DASH : w.performance.profit_factor.toFixed(2)), ['max', w => w.performance.profit_factor]],
       ['Closed round trips', w => int(w.performance.closed_trips)],
-      ['Average win', w => usd(w.performance.average_win), ['max', w => num(w.performance.average_win)]],
-      ['Average loss', w => usd(w.performance.average_loss), ['min', w => num(w.performance.average_loss)]],
-      ['Max drawdown', w => usd(w.performance.max_drawdown), ['min', w => num(w.performance.max_drawdown)]],
-      ['Best streak', w => `${int(w.performance.best_streak)}W`],
-      ['Worst streak', w => `${int(w.performance.worst_streak)}L`],
+      ['Average win', w => amount(w.performance.average_win), ['max', w => num(w.performance.average_win)]],
+      ['Average loss', w => amount(w.performance.average_loss), ['min', w => num(w.performance.average_loss)]],
+      [`Max drawdown${infoTip(TIP.drawdown, 'Max drawdown')}`, w => amount(w.performance.max_drawdown), ['min', w => num(w.performance.max_drawdown)]],
+      ['Best streak', w => count(w.performance.best_streak, 'win', 'wins')],
+      ['Worst streak', w => count(w.performance.worst_streak, 'loss', 'losses')],
       ['Median hold', w => duration(w.performance.median_hold_seconds)],
       ['Long / short trips', w => `${int(w.performance.long.trips)} / ${int(w.performance.short.trips)}`],
-      ['Best market', w => (w.performance.best_market ? esc(w.performance.best_market.symbol) : '—')],
-      ['Weakest market', w => (w.performance.worst_market ? esc(w.performance.worst_market.symbol) : '—')],
+      ['Best market', w => (w.performance.best_market ? esc(w.performance.best_market.symbol) : DASH)],
+      ['Worst market', w => (w.performance.worst_market ? esc(w.performance.worst_market.symbol) : DASH)],
       ['Liquidations', w => int(w.summary.liquidations), ['min', w => w.summary.liquidations]],
-      ['Net deposits', w => usd(w.summary.net_flow, { sign: true })],
-      ['First trade', w => (w.summary.first_trade ? date(w.summary.first_trade) : '—')]
+      [`Net flow${infoTip(TIP.flow, 'Net flow')}`, w => amount(w.summary.net_flow, true)],
+      ['First trade', w => (w.summary.first_trade ? date(w.summary.first_trade) : DASH)]
     ];
     // On phones each metric's label sits over its values, up to three a row
     // (four or five wallets take two rows), so no wallet is off-screen.
-    // Round-trip rows (win rate to weakest market) of a long history come from its
+    // Round-trip rows (win rate to worst market) of a long history come from its
     // latest events, as the wallet page says; the totals use every event.
-    const cut = ws.filter(w => !w.error && w.performance?.based_on?.truncated);
-    const note = cut.length ? `<div class="panel-foot"><span>Rows from win rate to weakest market use only the latest events of a long history: ${cut.map(w => `${esc(short(w.account.address))} ${int(w.performance.based_on.events)} of ${int(w.performance.based_on.total_events)} events${w.performance.based_on.since ? ` (since ${date(w.performance.based_on.since)})` : ''}`).join(' · ')}. Totals use full history.</span></div>` : '';
-    const bestOf = rank => { if (!rank) return -1; const [dir, v] = rank; const vals = ws.map(w => { if (w.error) return null; const x = Number(v(w)); return Number.isFinite(x) ? x : null; }); const ok = vals.filter(x => x !== null); if (ok.length < 2 || ok.every(x => x === ok[0])) return -1; const b = dir === 'max' ? Math.max(...ok) : Math.min(...ok); return vals.indexOf(b); };
-    $('table').innerHTML = `<div class="table-wrap"><table class="t compact cmp" style="--cols:${ws.length > 3 ? Math.ceil(ws.length / 2) : ws.length}"><thead><tr><th class="cmp-m">Metric</th>${ws.map(col).join('')}</tr></thead><tbody>${rows.map(([label, f, rank]) => { const best = bestOf(rank); return `<tr><td class="muted cmp-m">${label}</td>${ws.map((w, i) => (w.error ? '<td class="n faint">—</td>' : `<td class="n${i === best ? ' cmp-best' : ''}" style="--c:${colour(w.key)}"${i === best ? ' title="Best of these wallets"' : ''}>${f(w)}</td>`)).join('')}</tr>`; }).join('')}</tbody></table></div>${note}`;
+    const cut = found.filter(w => w.performance?.based_on?.truncated);
+    const note = cut.length ? `<div class="panel-foot"><span>Rows from win rate to worst market use only the latest events of a long history: ${cut.map(w => `${esc(short(w.account.address))} ${int(w.performance.based_on.events)} of ${int(w.performance.based_on.total_events)} events${w.performance.based_on.since ? ` (since ${date(w.performance.based_on.since)})` : ''}`).join(' · ')}. Totals use full history.</span></div>` : '';
+    const bestOf = rank => { if (!rank) return -1; const [dir, v] = rank; const vals = ws.map(w => { if (w.error) return null; const raw = v(w); if (raw === null || raw === undefined || raw === '') return null; const x = Number(raw); return Number.isFinite(x) ? x : null; }); const ok = vals.filter(x => x !== null); if (ok.length < 2 || ok.every(x => x === ok[0])) return -1; const b = dir === 'max' ? Math.max(...ok) : Math.min(...ok); return vals.indexOf(b); };
+    $('table').classList.remove('cmp-fail');
+    fill($('table'), `<div class="table-wrap"><table class="t compact cmp" style="--cols:${ws.length > 3 ? Math.ceil(ws.length / 2) : ws.length}"><thead><tr><th class="cmp-m">Metric</th>${ws.map(col).join('')}</tr></thead><tbody>${rows.map(([label, f, rank]) => { const best = bestOf(rank); return `<tr><td class="muted cmp-m">${label}</td>${ws.map((w, i) => (w.error ? `<td class="n">${DASH}</td>` : `<td class="n${i === best ? ' cmp-best' : ''}" style="--c:${colour(w.key)}"${i === best ? ' title="Best of these wallets"' : ''}>${f(w)}</td>`)).join('')}</tr>`; }).join('')}</tbody></table></div>${note}`);
     // A card per wallet above the chart: who it is, its net PnL and curve, three facts.
     // a long history's win rate counts only its latest events, as the wallet page says
     const cutNote = w => { const b = w.performance?.based_on; return b?.truncated && b.since ? ` <span class="cmp-since" title="Round trips from the latest ${int(b.events)} of ${int(b.total_events)} events">since ${date(b.since).slice(0, -6)}</span>` : ''; };
-    const found = ws.filter(w => !w.error);
     $('cards').hidden = !found.length; $('cards').style.setProperty('--n', found.length);
-    $('cards').innerHTML = ws.map((w, i) => (w.error ? '' : `<article class="cmp-card" style="--c:${colour(w.key)}"><header><i class="cmp-dot"></i><a class="mono" href="/wallet/${esc(w.account.address)}">${esc(short(w.account.address))}</a><span class="faint">#${esc(w.account.id)}</span>${remove(w)}</header><div class="cmp-big">${pnl(w.summary.net_pnl)}</div><div class="cmp-cap">Net PnL, all-time</div><div class="cmp-spark" id="sp-${i}"></div><dl class="cmp-facts"><div><dt>Account value</dt><dd>${usd(w.portfolio?.account_value)}</dd></div><div><dt>Win rate</dt><dd>${w.performance.win_rate_pct === null ? '—' : pct(w.performance.win_rate_pct, { digits: 1 })}${cutNote(w)}</dd></div><div><dt>Open positions</dt><dd>${int(w.positions?.length ?? 0)}</dd></div></dl></article>`)).join('');
+    morph($('cards'), ws.map((w, i) => (w.error ? '' : `<article class="cmp-card" style="--c:${colour(w.key)}"><header><i class="cmp-dot"></i><a class="mono" href="/wallet/${esc(w.account.address)}">${esc(short(w.account.address))}</a><span class="faint">#${esc(w.account.id)}</span>${remove(w)}</header><div class="cmp-big">${pnl(w.summary.net_pnl)}</div><div class="cmp-cap">Net PnL, all-time</div><div class="cmp-spark" id="sp-${i}"></div><dl class="cmp-facts"><div><dt>Account value</dt><dd>${usd(w.portfolio?.account_value)}</dd></div><div><dt>Win rate</dt><dd>${w.performance.win_rate_pct === null ? DASH : pct(w.performance.win_rate_pct, { digits: 1 })}${cutNote(w)}</dd></div><div><dt>Open positions</dt><dd>${int(w.positions?.length ?? 0)}</dd></div></dl></article>`)).join(''));
+    holds?.table?.(); holds?.cards?.();
+    drawn = true;
+    $('chart-panel').hidden = !found.length;
+    if (!found.length) { letGo(); return; } // every column says why; a chart would have nothing to draw
     // Cumulative PnL on a shared daily axis.
-    const full = await Promise.all(ws.map(w => (w.error ? null : get(`wallets/${encodeURIComponent(w.account.address)}`, { maxAge: 10000 }).catch(() => null))));
-    if (!alive) return;
+    const full = await Promise.all(ws.map(w => (w.error ? null : get(`wallets/${encodeURIComponent(w.account.address)}`, { maxAge: fresh ? 0 : 10000 }).catch(() => null))));
+    if (!current()) return;
+    letGo();
+    if (!full.some(Boolean)) { if (!$('chart').__chart) { $('legend').innerHTML = ''; panelError($('chart'), 'Could not load the PnL curves.', () => load({ fresh: true })); } return; }
     // Every calendar day from the first to the last, so quiet days keep their width.
     const seen = full.flatMap(f => (f?.pnl_daily ?? []).map(p => p.t)), days = [];
     if (seen.length) for (let t = Math.min(...seen); t <= Math.max(...seen); t += 86400) days.push(t);
     const series = full.map((f, i) => { if (!f) return null; const map = new Map(f.pnl_daily.map(p => [p.t, num(p.cumulative)])); let last = null; return { name: short(f.account.address), color: colour(ws[i].key), data: days.map(t => { if (map.has(t)) last = map.get(t); return last; }) }; }).filter(Boolean);
-    $('legend').innerHTML = series.map(s => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join('');
+    morph($('legend'), series.map(s => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join(''));
     full.forEach((f, i) => { const box = $(`sp-${i}`), s = f && series.find(x => x.color === colour(ws[i].key)); if (box && s) sparkline(box, s.data.filter(v => v !== null), { color: s.color }); });
     if (days.length) lineChart($('chart'), { times: days, series, bucketSeconds: 86400, fmt: v => usd(v, { sign: true }), area: false }); else $('chart').innerHTML = empty('No realized PnL yet');
   }
-  $('add').addEventListener('submit', e => { e.preventDefault(); const v = $('add-input').value.trim(); if (!/^(0x[0-9a-fA-F]{40}|\d{1,9})$/.test(v)) return; if (!keys.includes(v)) keys = [...keys, v].slice(-5); save(); navigate('/compare', { w: keys.join(',') }); });
-  load().catch(error => { $('table').innerHTML = empty(`Could not load (${error.message})`); });
+  const run = () => { stop?.(); stop = keepTrying(load, { alive: () => alive, fail: failed }); };
+  // A change of wallets: what is on screen stays, dimmed, until the answer replaces it.
+  function press() {
+    if (!keys.length) { nothing(); return; }
+    dropZoom($('chart'));
+    if (drawn) holds = { cards: hold($('cards')), table: hold($('table')), chart: hold($('chart-panel')) }; else waiting();
+    run();
+  }
+  $('add').addEventListener('submit', async e => {
+    e.preventDefault();
+    const input = $('add-input'), text = input.value.trim();
+    if (!text) return;
+    let found;
+    try { found = await resolveWallet(text); } catch { if (alive) toast('Search unavailable'); return; }
+    if (!alive) return;
+    const key = found.rows.length === 1 ? found.rows[0].address : found.key;
+    if (!key) { toast(found.rows.length > 1 ? 'Several wallets match. Type more of the address.' : found.note); return; }
+    if (keys.some(k => k.toLowerCase() === key.toLowerCase())) { toast('Already in the comparison'); return; }
+    if (keys.length === 5) toast(`Five at most: ${short(keys[0])} left the comparison`);
+    keys = [...keys, key].slice(-5);
+    input.value = '';
+    save(); setQuery({ w: keys.join(',') });
+  });
+  if (keys.length) { waiting(); run(); } else nothing();
   return {
+    // A refresh leaves a press in progress alone; if the first answer never came, it keeps trying.
+    refresh() { if (keys.length && !holds) load({ fresh: true }).catch(() => { if (alive && !drawn) run(); }); },
     onAction(a, t) {
-      if (a === 'remove') { keys = keys.filter(k => k !== t.dataset.key); save(); navigate('/compare', keys.length ? { w: keys.join(',') } : null); }
-      if (a === 'all-watch') navigate('/compare', { w: watch.list().slice(0, 5).map(w => w.key).join(',') });
+      if (a === 'remove') { keys = keys.filter(k => k !== t.dataset.key); save(); setQuery({ w: keys.length ? keys.join(',') : null }); }
+      if (a === 'all-watch') { keys = watch.list().slice(0, 5).map(w => w.key); save(); setQuery({ w: keys.join(',') }); }
     },
-    update(q) { keys = (q.get('w') ?? '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 5); load().catch(() => {}); },
-    destroy() { alive = false; }
+    update(q) { keys = parse(q); press(); },
+    destroy() { alive = false; stop?.(); letGo(); }
   };
 }

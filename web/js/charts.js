@@ -4,7 +4,7 @@
 import { usd, compact, dateTime, date, num, esc } from './format.js';
 
 const T = {
-  text: 'rgba(224,225,255,0.70)', faint: 'rgba(255,255,255,0.5)', grid: 'rgba(255,255,255,0.045)', axis: 'rgba(255,255,255,0.10)',
+  text: 'rgba(232,233,255,0.80)', faint: 'rgba(232,233,255,0.64)', grid: 'rgba(255,255,255,0.045)', axis: 'rgba(255,255,255,0.10)',
   accent: '#a2a4ff', long: '#81c784', short: '#f65a6e', tooltip: '#1c1b20', border: 'rgba(255,255,255,0.10)', surface: '#121113', font: 'Geist, ui-sans-serif, system-ui, sans-serif'
 };
 export const COLORS = T;
@@ -17,6 +17,15 @@ const whenLoaded = fn => (el, ...args) => { if (window.echarts || !el) return fn
 const registry = new Set();
 const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(entries => { for (const e of entries) { const c = e.target.__chart; c?.resize(); c?.__refit?.(); } }) : null;
 
+function sweep() {
+  for (const c of registry) {
+    try { const dom = c.getDom(); if (dom?.isConnected) continue; observer?.unobserve(dom); c.dispose(); } catch { /* already gone */ }
+    registry.delete(c);
+  }
+}
+// An inside zoom takes every wheel event over its chart, whatever zoomOnMouseWheel says.
+// Stopped on the way down, a plain wheel never reaches it and scrolls the page.
+const wheelScrolls = e => { if (!e.shiftKey) e.stopPropagation(); };
 function init(el) {
   if (!el || !window.echarts) return null;
   let chart = el.__chart;
@@ -28,7 +37,9 @@ function init(el) {
     registry.delete(chart); chart = null; el.__chart = null;
   }
   if (!chart) {
+    sweep(); // a re-rendered card leaves its old chart behind with no one to dispose it
     el.replaceChildren(); // a skeleton or message in the node gives way to the chart
+    el.addEventListener('wheel', wheelScrolls, { capture: true, passive: true }); // one function, so a redrawn node still has one listener
     chart = window.echarts.init(el, null, { renderer: 'canvas' });
     chart.__root = el.lastElementChild; // echarts appends its own root
     el.__chart = chart; registry.add(chart); observer?.observe(el);
@@ -37,11 +48,13 @@ function init(el) {
   chart.__refit = null; // so does the refit on a resize
   return chart;
 }
-// Exports: the plotted data (time-aligned series, as shown) and the image.
+// Exports: the plotted data (time-aligned series, as shown) and the image. A panel that
+// has since gone empty has lost the chart's root, so it has nothing to export.
+const live = el => { const chart = el?.__chart; return chart && !chart.isDisposed() && el.contains(chart.__root) ? chart : null; };
 // Text that a spreadsheet would run as a formula is prefixed with a quote.
 const csvCell = v => { let t = String(v ?? ''); if (typeof v === 'string' && /^[=+\-@\t\r]/.test(t) && !Number.isFinite(Number(t))) t = `'${t}`; return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
 export function chartCsv(el) {
-  const chart = el?.__chart; if (!chart) return null;
+  const chart = live(el); if (!chart) return null;
   const o = chart.getOption();
   const times = o.xAxis?.[0]?.data ?? [];
   const cols = [];
@@ -59,7 +72,7 @@ export function chartCsv(el) {
 // carries it in a band above the chart, right-aligned as in the head (entries
 // switched off in the chart are left out, a note without a dot stays faint).
 export function chartPng(el) {
-  const chart = el?.__chart; if (!chart) return null;
+  const chart = live(el); if (!chart) return null;
   const ratio = 2, src = chart.renderToCanvas({ pixelRatio: ratio, backgroundColor: T.surface });
   const keys = [...(el.closest('.panel')?.querySelectorAll('.legend > span, .legend > .lg:not(.off)') ?? [])].map(n => ({ color: n.querySelector('i')?.style.background || null, name: n.textContent.trim() })).filter(k => k.name);
   if (!keys.length) return src.toDataURL('image/png');
@@ -128,7 +141,7 @@ function labelAt(el, times, bucketSeconds) {
   return v => {
     if (el.clientWidth !== width) {
       width = el.clientWidth;
-      const slot = (width - 60) / Math.max(1, times.length), need = textWidth('Sep 30', 10.5) + 16; // 60: about the value axis; 16: the gap between labels
+      const slot = (width - 60) / Math.max(1, times.length), need = textWidth('Sep 30') + 16; // 60: about the value axis; 16: the gap between labels
       step = HOUR_STEPS.find(s => s % bucketSeconds === 0 && s / bucketSeconds * slot >= need) ?? 86400;
     }
     return Number(v) % step === 0;
@@ -140,10 +153,10 @@ const timeAxis = (times, bucketSeconds, el) => {
     type: 'category', data: times, boundaryGap: true,
     axisLine: { show: false }, axisTick: { show: false },
     axisLabel: {
-      color: T.faint, hideOverlap: true, margin: 12, fontSize: 10.5,
+      color: T.faint, hideOverlap: true, margin: 12, fontSize: 11,
       ...(at ? { interval: (i, v) => at(v) } : {}),
       formatter: v => { const t = timeLabel(v, bucketSeconds); return bucketSeconds < 86400 && midnight(v) ? `{d|${t}}` : t; },
-      rich: { d: { color: 'rgba(255,255,255,0.78)', fontWeight: 500, fontSize: 10.5 } }
+      rich: { d: { color: 'rgba(255,255,255,0.78)', fontWeight: 500, fontSize: 11 } }
     }
   };
 };
@@ -158,7 +171,7 @@ function fitRight(chart, el, times, bucketSeconds, { right = 8, at: fixed, line 
     const at = fixed ?? (labelled ? times.findLastIndex(labelled) : times.length - 1);
     if (at < 0) return right;
     const slot = (el.clientWidth - 44 - right) / Math.max(1, times.length - (line ? 1 : 0)); // 44: about the value axis and its labels
-    const overhang = textWidth(timeLabel(times[at], bucketSeconds), 10.5) / 2 + 1 - (times.length - 1 - at + (line ? 0 : 0.5)) * slot;
+    const overhang = textWidth(timeLabel(times[at], bucketSeconds)) / 2 + 1 - (times.length - 1 - at + (line ? 0 : 0.5)) * slot;
     return Math.max(right, Math.ceil(overhang));
   };
   chart.__refit = () => { const r = fit(); if (r !== chart.__right) { chart.__right = r; chart.setOption({ grid: chart.getOption().grid.map(() => ({ right: r })) }); } };
@@ -169,7 +182,7 @@ const niceCeil = (v, steps = [1, 2, 2.5, 5, 10]) => { const p = 10 ** Math.floor
 // Axis money: $1.5M, $900K, $0.
 export const usdAxis = v => { const n = Number(v); if (!n) return '$0'; const a = Math.abs(n); const [k, u] = a >= 1e9 ? [1e9, 'B'] : a >= 1e6 ? [1e6, 'M'] : a >= 1e3 ? [1e3, 'K'] : [1, '']; const x = a / k; return `${n < 0 ? '-' : ''}$${x >= 100 || Number.isInteger(x) ? Math.round(x) : x.toFixed(1).replace(/\.0$/, '')}${u}`; };
 const SPLIT = { lineStyle: { color: T.grid, type: [3, 4] } };
-const valueAxis = fmt => ({ type: 'value', splitNumber: 3, axisLabel: { color: T.faint, formatter: fmt, margin: 10, fontSize: 10.5 }, splitLine: SPLIT, axisLine: { show: false }, axisTick: { show: false } });
+const valueAxis = fmt => ({ type: 'value', splitNumber: 3, axisLabel: { color: T.faint, formatter: fmt, margin: 10, fontSize: 11 }, splitLine: SPLIT, axisLine: { show: false }, axisTick: { show: false } });
 // Tooltip rows carry the same dot as the legends.
 const row = (color, name, value) => `<div style="display:flex;justify-content:space-between;gap:18px;line-height:1.7"><span><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-right:7px;vertical-align:1px"></span>${esc(name)}</span><b style="font-weight:500;font-variant-numeric:tabular-nums">${value}</b></div>`;
 // Rounds the outer end of each stack: per bucket, the last shown series with a value there.
@@ -195,8 +208,12 @@ export function periodLabel(t, bucketSeconds) {
   return `${MONTHS[a.getUTCMonth()]} ${a.getUTCDate()}, ${hm(a)}–${hm(b)} UTC`;
 }
 const PARTIAL_OPACITY = 0.4;
-const fade = (data, at) => (at < 0 ? data : data.map((d, i) => (i !== at ? d : d && typeof d === 'object' && !Array.isArray(d) ? { ...d, itemStyle: { ...d.itemStyle, opacity: PARTIAL_OPACITY } } : { value: d, itemStyle: { opacity: PARTIAL_OPACITY } })));
-function tooltip(fmt, bucketSeconds, { total = false, exclude = null, partial = -1 } = {}) {
+// The window starts inside its first bucket, so that bar holds only the part inside and is
+// drawn like a running bucket. From launch nothing lies before it, so there is no cut.
+export const cutsFirst = s => s?.meta?.window !== 'all' && Number(s?.meta?.from) > Number(s?.times?.[0]);
+const bucketNote = (i, partial, first) => (i === partial ? ' · in progress' : first && i === 0 ? ' · partly outside the window' : '');
+const fade = (data, at, first = false) => (at < 0 && !first ? data : data.map((d, i) => (i !== at && !(first && i === 0) ? d : d && typeof d === 'object' && !Array.isArray(d) ? { ...d, itemStyle: { ...d.itemStyle, opacity: PARTIAL_OPACITY } } : { value: d, itemStyle: { opacity: PARTIAL_OPACITY } })));
+function tooltip(fmt, bucketSeconds, { total = false, exclude = null, partial = -1, first = false } = {}) {
   return params => {
     const all = Array.isArray(params) ? params : [params];
     // A running-total line is shown on its own row, outside the per-period sum.
@@ -204,8 +221,7 @@ function tooltip(fmt, bucketSeconds, { total = false, exclude = null, partial = 
     const list = exclude ? all.filter(p => p.seriesName !== exclude) : all;
     if (!list.length) return '';
     const t = list[0].axisValue;
-    const running = partial >= 0 && list[0].dataIndex === partial ? ' · in progress' : '';
-    const head = `<div style="color:${T.faint};margin-bottom:4px">${periodLabel(t, bucketSeconds)}${running}</div>`;
+    const head = `<div style="color:${T.faint};margin-bottom:4px">${periodLabel(t, bucketSeconds)}${bucketNote(list[0].dataIndex, partial, first)}</div>`;
     const rows = list.filter(p => p.value !== null && p.value !== undefined && p.value !== 0 && p.value !== '-').sort((a, b) => Math.abs(b.value) - Math.abs(a.value)).slice(0, 10);
     const sum = list.reduce((a, p) => a + (num(p.value) ?? 0), 0);
     const ev = Array.isArray(extra?.value) ? extra.value[1] : extra?.value; // a drawn running total is [index, total, previous]
@@ -220,18 +236,20 @@ function sparklineNow(el, values, { color = T.accent, area = true } = {}) {
   chart.setOption({
     animation: false, grid: { left: 0, right: 0, top: 2, bottom: 0 },
     xAxis: { type: 'category', show: false, data: values.map((_, i) => i) }, yAxis: { type: 'value', show: false, scale: true },
-    series: [{ type: 'line', data: values, symbol: 'none', smooth: 0.35, lineStyle: { color, width: 1.5 }, areaStyle: area ? { color: new window.echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: color + '59' }, { offset: 1, color: color + '00' }]) } : undefined }]
+    series: [{ type: 'line', data: values, symbol: 'none', smooth: false, lineStyle: { color, width: 1.5 }, areaStyle: area ? { color: color + '1f' } : undefined }]
   }, true);
 }
 
-// A range slider under a time chart (drag or scroll to zoom), plus wheel zoom.
+// A range slider under a time chart, plus Shift and the wheel to zoom.
 // A chart redrawn in place (a refresh) keeps the stretch the reader zoomed to.
 export const CUMULATIVE = 'Cumulative';
-const zoomOf = chart => { const z = chart.getOption()?.dataZoom?.[0]; return z && (z.start > 0 || z.end < 100) ? { start: z.start, end: z.end } : null; };
+// A new window starts from the whole range: call dropZoom just before asking for it.
+export const dropZoom = el => { if (el?.__chart) el.__chart.__dropZoom = true; };
+const zoomOf = chart => { if (chart.__dropZoom) { chart.__dropZoom = false; return null; } const z = chart.getOption()?.dataZoom?.[0]; return z && (z.start > 0 || z.end < 100) ? { start: z.start, end: z.end } : null; };
 function zoomOptions(xAxisIndex = 0, kept = null) {
   return [
     { type: 'inside', xAxisIndex, zoomOnMouseWheel: 'shift', moveOnMouseMove: false, ...kept },
-    { type: 'slider', xAxisIndex, ...kept, height: 16, bottom: 4, borderColor: T.axis, backgroundColor: 'rgba(255,255,255,0.02)', fillerColor: 'rgba(162,164,255,0.12)', dataBackground: { lineStyle: { color: 'rgba(162,164,255,0.35)' }, areaStyle: { color: 'rgba(162,164,255,0.08)' } }, selectedDataBackground: { lineStyle: { color: T.accent }, areaStyle: { color: 'rgba(162,164,255,0.18)' } }, handleStyle: { color: '#24222a', borderColor: T.accent }, moveHandleSize: 0, textStyle: { color: T.faint, fontSize: 10 }, labelFormatter: () => '', brushSelect: false }
+    { type: 'slider', xAxisIndex, ...kept, height: 16, bottom: 4, borderColor: T.axis, backgroundColor: 'rgba(255,255,255,0.02)', fillerColor: 'rgba(162,164,255,0.12)', dataBackground: { lineStyle: { color: 'rgba(162,164,255,0.35)' }, areaStyle: { color: 'rgba(162,164,255,0.08)' } }, selectedDataBackground: { lineStyle: { color: T.accent }, areaStyle: { color: 'rgba(162,164,255,0.18)' } }, handleStyle: { color: '#24222a', borderColor: T.accent }, moveHandleSize: 0, textStyle: { color: T.faint, fontSize: 11 }, labelFormatter: () => '', brushSelect: false }
   ];
 }
 
@@ -250,7 +268,7 @@ const runningTotal = (total, bars) => ({
 // Stacked bars over time (one series per market, colour follows the market).
 // cumulative: a running total of all series as a line on a right-hand axis.
 // zoom: a range slider under the chart.
-function stackedBarsNow(el, { times, series, bucketSeconds, fmt = v => usd(v), yFmt = usdAxis, cumulative = false, zoom = false }) {
+function stackedBarsNow(el, { times, series, bucketSeconds, fmt = v => usd(v), yFmt = usdAxis, cumulative = false, zoom = false, firstPartial = false }) {
   const chart = init(el);
   if (!chart) return;
   const kept = zoom ? zoomOf(chart) : null;
@@ -258,7 +276,7 @@ function stackedBarsNow(el, { times, series, bucketSeconds, fmt = v => usd(v), y
   const total = cumulative ? times.map((_, i) => (run += series.reduce((a, s) => a + (num(s.data[i]) || 0), 0))) : null;
   const partial = partialAt(times, bucketSeconds);
   const layout = { barMaxWidth: 20, barCategoryGap: '30%' };
-  const data = shown => capped(series.map(s => s.data), [3, 3, 0, 0], shown).map(d => fade(d, partial));
+  const data = shown => capped(series.map(s => s.data), [3, 3, 0, 0], shown).map(d => fade(d, partial, firstPartial));
   // A series hidden from the legend hands the rounded top to the one now outermost.
   chart.on('legendselectchanged', e => chart.setOption({ series: data(series.map(s => e.selected[s.name] !== false)).map(d => ({ data: d })) }));
   chart.setOption({
@@ -269,7 +287,7 @@ function stackedBarsNow(el, { times, series, bucketSeconds, fmt = v => usd(v), y
     // The running total's ticks fall on the bars' gridlines.
     yAxis: cumulative ? [valueAxis(yFmt), { ...valueAxis(yFmt), splitLine: { show: false }, alignTicks: true }] : valueAxis(yFmt),
     legend: { show: false, data: [...series.map(s => s.name), ...(cumulative ? [CUMULATIVE] : [])] },
-    tooltip: { ...base().tooltip, formatter: tooltip(fmt, bucketSeconds, { total: true, exclude: CUMULATIVE, partial }) },
+    tooltip: { ...base().tooltip, formatter: tooltip(fmt, bucketSeconds, { total: true, exclude: CUMULATIVE, partial, first: firstPartial }) },
     dataZoom: zoom ? zoomOptions(0, kept) : undefined,
     series: [
       ...data().map((d, i) => ({ name: series[i].name, type: 'bar', stack: 'a', data: d, itemStyle: { color: series[i].color, borderColor: T.surface, borderWidth: series.length > 1 ? 0.5 : 0 }, ...layout, emphasis: { focus: 'series' } })),
@@ -297,13 +315,13 @@ function lineChartNow(el, { times, series, bucketSeconds, fmt = v => usd(v), yFm
   chart.setOption({
     ...base(), grid: { ...base().grid, right: fitRight(chart, el, times, bucketSeconds, { line: true }) }, xAxis: { ...timeAxis(times, bucketSeconds, el), boundaryGap: false }, yAxis: { ...valueAxis(yFmt), scale },
     tooltip: { ...base().tooltip, formatter: tooltip(fmt, bucketSeconds) },
-    series: series.map(s => ({ name: s.name, type: 'line', data: s.data, symbol: 'none', smooth: 0.3, connectNulls: true, lineStyle: { color: s.color, width: 1.75 }, itemStyle: { color: s.color }, areaStyle: area && series.length === 1 ? { color: new window.echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: s.color + '47' }, { offset: 1, color: s.color + '00' }]) } : undefined }))
+    series: series.map(s => ({ name: s.name, type: 'line', data: s.data, symbol: 'none', smooth: false, connectNulls: true, lineStyle: { color: s.color, width: 1.75 }, itemStyle: { color: s.color }, areaStyle: area && series.length === 1 ? { color: new window.echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: s.color + '47' }, { offset: 1, color: s.color + '00' }]) } : undefined }))
   }, true);
 }
 
 // Positive values green, negative red (net flows, daily PnL).
 // dayTicks: irregular event times (funding) get one date label per UTC day.
-function signedBarsNow(el, { times, values, bucketSeconds, name = 'Value', fmt = v => usd(v, { sign: true }), yFmt = usdAxis, dayTicks = false }) {
+function signedBarsNow(el, { times, values, bucketSeconds, name = 'Value', fmt = v => usd(v, { sign: true }), yFmt = usdAxis, dayTicks = false, firstPartial = false }) {
   const chart = init(el);
   if (!chart) return;
   const xAxis = timeAxis(times, bucketSeconds, el);
@@ -319,14 +337,14 @@ function signedBarsNow(el, { times, values, bucketSeconds, name = 'Value', fmt =
   const partial = dayTicks ? -1 : partialAt(times, bucketSeconds); // funding events are points in time, not periods
   chart.setOption({
     ...base(), grid: { ...base().grid, right: fitRight(chart, el, times, dayTicks ? 86400 : bucketSeconds, { at }) }, xAxis, yAxis: valueAxis(yFmt),
-    tooltip: { ...base().tooltip, formatter: tooltip(fmt, bucketSeconds, { partial }) },
-    series: [{ name, type: 'bar', data: fade(values.map(v => ({ value: v, itemStyle: { color: (num(v) ?? 0) >= 0 ? T.long : T.short, borderRadius: (num(v) ?? 0) >= 0 ? [3, 3, 0, 0] : [0, 0, 3, 3] } })), partial), barMaxWidth: 18 }]
+    tooltip: { ...base().tooltip, formatter: tooltip(fmt, bucketSeconds, { partial, first: firstPartial }) },
+    series: [{ name, type: 'bar', data: fade(values.map(v => ({ value: v, itemStyle: { color: (num(v) ?? 0) >= 0 ? T.long : T.short, borderRadius: (num(v) ?? 0) >= 0 ? [3, 3, 0, 0] : [0, 0, 3, 3] } })), partial, firstPartial), barMaxWidth: 18 }]
   }, true);
 }
 
 // Two-sided bars: inflow above zero, outflow below (drawn negative), with the
 // net per period as a line (deposits vs withdrawals, taker buys vs sells).
-function twoSidedNow(el, { times, up, down, net = 'Net', bucketSeconds, fmt = v => usd(v, { sign: true }), yFmt = usdAxis }) {
+function twoSidedNow(el, { times, up, down, net = 'Net', bucketSeconds, fmt = v => usd(v, { sign: true }), yFmt = usdAxis, firstPartial = false }) {
   const chart = init(el);
   if (!chart) return;
   const upData = up.data.map(v => num(v) ?? 0), downData = down.data.map(v => -(num(v) ?? 0));
@@ -334,10 +352,10 @@ function twoSidedNow(el, { times, up, down, net = 'Net', bucketSeconds, fmt = v 
   chart.setOption({
     ...base(), grid: { ...base().grid, right: fitRight(chart, el, times, bucketSeconds) }, xAxis: timeAxis(times, bucketSeconds, el), yAxis: valueAxis(yFmt),
     legend: { show: false, data: [up.name, down.name, net] },
-    tooltip: { ...base().tooltip, formatter: tooltip(fmt, bucketSeconds, { partial }) },
+    tooltip: { ...base().tooltip, formatter: tooltip(fmt, bucketSeconds, { partial, first: firstPartial }) },
     series: [
-      { name: up.name, type: 'bar', stack: 's', data: fade(upData, partial), itemStyle: { color: up.color ?? T.long, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 18 },
-      { name: down.name, type: 'bar', stack: 's', data: fade(downData, partial), itemStyle: { color: down.color ?? T.short, borderRadius: [0, 0, 3, 3] }, barMaxWidth: 18 },
+      { name: up.name, type: 'bar', stack: 's', data: fade(upData, partial, firstPartial), itemStyle: { color: up.color ?? T.long, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 18 },
+      { name: down.name, type: 'bar', stack: 's', data: fade(downData, partial, firstPartial), itemStyle: { color: down.color ?? T.short, borderRadius: [0, 0, 3, 3] }, barMaxWidth: 18 },
       { name: net, type: 'line', data: upData.map((v, i) => v + downData[i]), symbol: 'none', lineStyle: { color: '#ffffff', width: 1.25, opacity: 0.75 }, itemStyle: { color: '#ffffff' }, z: 5 }
     ]
   }, true);
@@ -401,7 +419,7 @@ function candlesNow(el, { times, ohlc, volume, bucketSeconds, priceFmt, volColor
   // off the axis (0.02605 to 0.03), and it would not be drawn.
   const markLine = labelled.length ? {
     symbol: 'none', silent: true, precision: 10, lineStyle: { color: 'transparent' },
-    data: labelled.map(b => ({ yAxis: (b.lo + b.hi) / 2, label: { position: 'insideStart', distance: 4, color: b.side === 'long' ? T.long : T.short, fontSize: 10.5, backgroundColor: 'rgba(18,17,19,0.8)', padding: [2, 5], borderRadius: 4, formatter: () => `liq ${usd(b.n)}` } }))
+    data: labelled.map(b => ({ yAxis: (b.lo + b.hi) / 2, label: { position: 'insideStart', distance: 4, color: b.side === 'long' ? T.long : T.short, fontSize: 11, backgroundColor: 'rgba(18,17,19,0.8)', padding: [2, 5], borderRadius: 4, formatter: () => `liq ${usd(b.n)}` } }))
   } : undefined;
   // Volume ticks at zero, half and a round top that the busiest bar in view nearly reaches.
   const volAxis = (from = 0, to = volume.length - 1) => { const top = niceCeil(Math.max(1, ...volume.slice(from, to + 1).map(v => num(v) ?? 0)), [1, 1.5, 2, 3, 4, 5, 6, 8, 10]); return { min: 0, max: top, interval: top / 2 }; };
@@ -466,7 +484,7 @@ function mirroredNow(el, { labels, long, short, fmt = v => usd(v), legend = true
     ...base(), grid: { left: 8, right: 28, top: legend ? below() : 8, bottom: 6, containLabel: true },
     legend: { show: legend, top: 0, right: 0, icon: 'circle', itemWidth: 7, itemHeight: 7, itemGap: 14, textStyle: { color: T.text, fontSize: 11 }, data: [longName, shortName] },
     // Symmetric around zero so both sides read on the same scale.
-    xAxis: { type: 'value', min: -edge, max: edge, axisLabel: { color: T.faint, fontSize: 10.5, hideOverlap: true, showMinLabel: false, showMaxLabel: false, formatter: v => usdAxis(Math.abs(v)) }, splitLine: SPLIT },
+    xAxis: { type: 'value', min: -edge, max: edge, axisLabel: { color: T.faint, fontSize: 11, hideOverlap: true, showMinLabel: false, showMaxLabel: false, formatter: v => usdAxis(Math.abs(v)) }, splitLine: SPLIT },
     yAxis: { type: 'category', data: labels, inverse: true, axisTick: { show: false }, axisLine: { lineStyle: { color: T.axis } }, axisLabel: { color: T.text } },
     tooltip: { ...base().tooltip, trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: ps => `<div style="color:${T.faint};margin-bottom:4px">Price moves ${ps[0].axisValue}</div>` + ps.map(p => row(p.color, p.seriesName, fmt(Math.abs(p.value)))).join('') },
     series: [
@@ -478,7 +496,7 @@ function mirroredNow(el, { labels, long, short, fmt = v => usd(v), legend = true
 
 // Open interest opened (above zero) and closed (below) per bucket, long and
 // short stacked, with the net change as a line. Closes are the paler shade.
-function flowBarsNow(el, { times, longOpen, longClose, shortOpen, shortClose, bucketSeconds, fmt = v => usd(v), yFmt = usdAxis }) {
+function flowBarsNow(el, { times, longOpen, longClose, shortOpen, shortClose, bucketSeconds, fmt = v => usd(v), yFmt = usdAxis, firstPartial = false }) {
   const chart = init(el);
   if (!chart) return;
   const partial = partialAt(times, bucketSeconds);
@@ -486,14 +504,14 @@ function flowBarsNow(el, { times, longOpen, longClose, shortOpen, shortClose, bu
   const lo = n(longOpen), lc = n(longClose), so = n(shortOpen), sc = n(shortClose);
   const net = lo.map((v, i) => v - lc[i]); // long and short open interest move together
   const opens = capped([lo, so], [3, 3, 0, 0]), closes = capped([lc.map(v => -v), sc.map(v => -v)], [0, 0, 3, 3]);
-  const bar = (name, data, color, stack) => ({ name, type: 'bar', stack, data: fade(data, partial), itemStyle: { color }, barMaxWidth: 18, emphasis: { focus: 'series' } });
+  const bar = (name, data, color, stack) => ({ name, type: 'bar', stack, data: fade(data, partial, firstPartial), itemStyle: { color }, barMaxWidth: 18, emphasis: { focus: 'series' } });
   chart.setOption({
     ...base(), grid: { ...base().grid, right: fitRight(chart, el, times, bucketSeconds) }, xAxis: timeAxis(times, bucketSeconds, el), yAxis: valueAxis(v => yFmt(Math.abs(v)) === '$0' ? '$0' : `${v < 0 ? '-' : ''}${yFmt(Math.abs(v))}`),
     legend: { show: false },
     tooltip: { ...base().tooltip, formatter: params => {
       const all = Array.isArray(params) ? params : [params];
       const i = all[0]?.dataIndex ?? 0, t = all[0]?.axisValue;
-      const head = `<div style="color:${T.faint};margin-bottom:4px">${periodLabel(t, bucketSeconds)}${i === partial ? ' · in progress' : ''}</div>`;
+      const head = `<div style="color:${T.faint};margin-bottom:4px">${periodLabel(t, bucketSeconds)}${bucketNote(i, partial, firstPartial)}</div>`;
       return head + row(T.long, 'Longs opened', fmt(lo[i])) + row(T.long + '80', 'Longs closed', fmt(lc[i])) + row(T.short, 'Shorts opened', fmt(so[i])) + row(T.short + '80', 'Shorts closed', fmt(sc[i]))
         + `<div style="border-top:1px solid ${T.border};margin-top:4px;padding-top:4px">${row('#ffffff', 'Open interest change', `${net[i] > 0 ? '+' : ''}${fmt(net[i])}`)}</div>`;
     } },
@@ -517,8 +535,8 @@ function entryProfileNow(el, { bins, mark, priceFmt = v => String(v), fmt = v =>
   const edge = niceCeil(peak * 1.05);
   chart.setOption({
     ...base(), grid: { left: 8, right: 20, top: 8, bottom: 6, containLabel: true },
-    xAxis: { type: 'value', min: -edge, max: edge, axisLabel: { color: T.faint, fontSize: 10.5, hideOverlap: true, showMinLabel: false, showMaxLabel: false, formatter: v => usdAxis(Math.abs(v)) }, splitLine: SPLIT },
-    yAxis: { type: 'category', data: labels, axisTick: { show: false }, axisLine: { lineStyle: { color: T.axis } }, axisLabel: { color: T.faint, fontSize: 10.5, hideOverlap: true, interval: i => i % 4 === 0 || Boolean(bins[i]?.edge) } }, // the mark has its own line label
+    xAxis: { type: 'value', min: -edge, max: edge, axisLabel: { color: T.faint, fontSize: 11, hideOverlap: true, showMinLabel: false, showMaxLabel: false, formatter: v => usdAxis(Math.abs(v)) }, splitLine: SPLIT },
+    yAxis: { type: 'category', data: labels, axisTick: { show: false }, axisLine: { lineStyle: { color: T.axis } }, axisLabel: { color: T.faint, fontSize: 11, hideOverlap: true, interval: i => i % 4 === 0 || Boolean(bins[i]?.edge) } }, // the mark has its own line label
     tooltip: { ...base().tooltip, trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: ps => { const b = bins[ps[0].dataIndex]; const range = b.edge === 'below' ? `below ${priceFmt(b.hi)}` : b.edge === 'above' ? `above ${priceFmt(b.lo)}` : `${priceFmt(b.lo)} – ${priceFmt(b.hi)}`; return `<div style="color:${T.faint};margin-bottom:4px">Entry ${range}</div>${row(T.long, `Longs · ${b.long_count}`, fmt(b.long))}${row(T.short, `Shorts · ${b.short_count}`, fmt(b.short))}`; } },
     series: [
       { name: 'Longs', type: 'bar', stack: 'x', data: bins.map(b => num(b.long) ?? 0), itemStyle: { color: T.long, borderRadius: [0, 3, 3, 0] }, barCategoryGap: '20%',
