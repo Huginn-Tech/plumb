@@ -4,7 +4,7 @@
 import { get, stream } from '../api.js';
 import { usd, usdShort, usdFull, compact, int, price, dpOf, pct, num, esc, signClass, timeOnly, dateTime, ago, duration } from '../format.js';
 import { kpi, keepDots, infoTip, seg, table, mktLink, sideTag, addr, pnl, tradeAction, DASH, chartTools, skRows, skKpis, skChart, empty, assignColors, colorOf, hasColor, logo, ICON, OTHER_HEX, SLOT_HEX, mergeByAsset, hold, morph, panelError, keepTrying, fitRows } from '../ui.js';
-import { sparkline, stackedBars, lineChart, signedBars, twoSided, toggleSeries, dropZoom, COLORS, CUMULATIVE } from '../charts.js';
+import { sparkline, stackedBars, lineChart, signedBars, twoSided, toggleSeries, dropZoom, cutsFirst, COLORS, CUMULATIVE } from '../charts.js';
 
 const WINDOWS = [['24h', '24H'], ['7d', '7D'], ['30d', '30D'], ['all', 'All']];
 const MIN_SIZES = [['0', 'All'], ['100', '≥$100'], ['1000', '≥$1K'], ['10000', '≥$10K']];
@@ -235,7 +235,7 @@ export function mount(el, { query, setQuery }) {
     // With the daily/weekly switch shown, the meta says only UTC.
     $('chart-meta').textContent = BUCKET_CHOICES[vw] ? 'UTC' : `${BUCKET_NAMES[b] ?? `${vseries.meta.bucket}`} bars · UTC`;
     const list = byMarket('volume', vseries);
-    stackedBars(node, { times: vseries.times, series: list, bucketSeconds: b, cumulative: true, zoom: true });
+    stackedBars(node, { times: vseries.times, series: list, bucketSeconds: b, cumulative: true, zoom: true, firstPartial: cutsFirst(vseries) });
     for (const name of hidden) if (name === CUMULATIVE || list.some(s => s.name === name)) toggleSeries(node, name);
     const isOff = name => (hidden.has(name) ? ' off' : '');
     morph($('legend'), list.map(s => `<button class="lg${isOff(s.name)}" data-action="toggle" data-name="${esc(s.name)}"><i style="background:${s.color}"></i>${legendLogo(s)}${esc(s.name)}</button>`).join('')
@@ -260,7 +260,7 @@ export function mount(el, { query, setQuery }) {
     const sr = d.s, pts = sr.points, times = sr.times, b = sr.meta.bucket_seconds;
     const list = feeView === 'market' ? byMarket('fees', sr) : [{ name: 'Protocol', color: SLOT_HEX[0], data: pts.map(p => num(p.protocol_fees)) }, { name: 'Insurance fund', color: SLOT_HEX[2], data: pts.map(p => num(p.insurance_fees)) }].filter(x => x.data.some(v => v > 0));
     legendOf('fees', list);
-    if (list.length) stackedBars(node, { times, series: list, bucketSeconds: b }); else node.innerHTML = empty('No fees in this period');
+    if (list.length) stackedBars(node, { times, series: list, bucketSeconds: b, firstPartial: cutsFirst(sr) }); else node.innerHTML = empty('No fees in this period');
   }
   // Each trend panel: its window's totals (header) and series (chart).
   const trendOf = {};
@@ -298,7 +298,7 @@ export function mount(el, { query, setQuery }) {
       case 'flows':
         headValue('flows', usd(h.net_flow.value, { sign: true }), `${amt(h.deposits.value)} in · ${amt(h.withdrawals.value)} out · ${winLabel(win)}`);
         legendOf('flows', [{ name: 'Deposits', color: COLORS.long }, { name: 'Withdrawals', color: COLORS.short }, { name: 'Net flow', ...NET }]); // the chart's own names, as in its tooltip
-        twoSided(node, { times, bucketSeconds: b, up: { name: 'Deposits', data: pts.map(p => p.deposits) }, down: { name: 'Withdrawals', data: pts.map(p => p.withdrawals) }, net: 'Net flow' });
+        twoSided(node, { times, bucketSeconds: b, firstPartial: cutsFirst(sr), up: { name: 'Deposits', data: pts.map(p => p.deposits) }, down: { name: 'Withdrawals', data: pts.map(p => p.withdrawals) }, net: 'Net flow' });
         break;
       case 'traders':
         {
@@ -311,7 +311,7 @@ export function mount(el, { query, setQuery }) {
             { name: 'First-time traders', color: SLOT_HEX[2], data: pts.map(p => p.new_traders ?? 0) }
           ] : [{ name: 'Active traders', color: COLORS.accent, data: pts.map(p => p.traders ?? 0) }];
           legendOf('traders', split.length > 1 ? split : []);
-          stackedBars(node, { times, series: split, bucketSeconds: b, fmt: v => int(v), yFmt: v => (Math.abs(v) >= 1000 ? compact(v, { digits: 1 }) : int(v)) });
+          stackedBars(node, { times, series: split, bucketSeconds: b, firstPartial: cutsFirst(sr), fmt: v => int(v), yFmt: v => (Math.abs(v) >= 1000 ? compact(v, { digits: 1 }) : int(v)) });
         }
         break;
       case 'fees':
@@ -324,7 +324,7 @@ export function mount(el, { query, setQuery }) {
         headValue('liq', usd(h.liquidated.value), `${int(h.liquidations.value)} liquidations · ${winLabel(win)}`);
         const list = byMarket('liquidated', sr);
         legendOf('liq', list.length ? [...list, { name: 'Cumulative', ...NET }] : []);
-        if (list.length) stackedBars(node, { times, series: list, bucketSeconds: b, cumulative: true }); else node.innerHTML = empty('No liquidations in this period');
+        if (list.length) stackedBars(node, { times, series: list, bucketSeconds: b, cumulative: true, firstPartial: cutsFirst(sr) }); else node.innerHTML = empty('No liquidations in this period');
         break;
       }
       case 'tpnl': {
@@ -334,14 +334,14 @@ export function mount(el, { query, setQuery }) {
         const value = pnl(total), line = () => `${winLabel(win)}${afterFees?.win === win ? ` · after fees ${afterFees.text}` : ''}`;
         headValue('tpnl', value, line());
         get(`traders/summary?window=${win}`, { maxAge: 20000 }).then(t => { if (!alive || !t || trendOf.tpnl?.win !== win) return; afterFees = { win, text: amt(t.net_pnl, { sign: true }) }; headValue('tpnl', value, line()); }).catch(() => {});
-        signedBars(node, { times, values: pts.map(p => num(p.realized_pnl)), bucketSeconds: b, name: 'Trader realized PnL' });
+        signedBars(node, { times, values: pts.map(p => num(p.realized_pnl)), bucketSeconds: b, name: 'Trader realized PnL', firstPartial: cutsFirst(sr) });
         break;
       }
       case 'taker': {
         const buys = d.p.markets.reduce((a, m) => a + (num(m.taker_buy) ?? 0), 0), sells = d.p.markets.reduce((a, m) => a + (num(m.taker_sell) ?? 0), 0);
         headValue('taker', buys + sells ? `${pct(buys / (buys + sells) * 100, { digits: 1 })} buys` : '—', `${amt(buys)} bought · ${amt(sells)} sold · ${winLabel(win)}`);
         legendOf('taker', [{ name: 'Taker buys', color: COLORS.long }, { name: 'Taker sells', color: COLORS.short }, { name: 'Net taker buying', ...NET }]);
-        twoSided(node, { times, bucketSeconds: b, up: { name: 'Taker buys', data: pts.map(p => p.taker_buy) }, down: { name: 'Taker sells', data: pts.map(p => p.taker_sell) }, net: 'Net taker buying' });
+        twoSided(node, { times, bucketSeconds: b, firstPartial: cutsFirst(sr), up: { name: 'Taker buys', data: pts.map(p => p.taker_buy) }, down: { name: 'Taker sells', data: pts.map(p => p.taker_sell) }, net: 'Net taker buying' });
         break;
       }
       default:

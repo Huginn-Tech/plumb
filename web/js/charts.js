@@ -208,8 +208,12 @@ export function periodLabel(t, bucketSeconds) {
   return `${MONTHS[a.getUTCMonth()]} ${a.getUTCDate()}, ${hm(a)}–${hm(b)} UTC`;
 }
 const PARTIAL_OPACITY = 0.4;
-const fade = (data, at) => (at < 0 ? data : data.map((d, i) => (i !== at ? d : d && typeof d === 'object' && !Array.isArray(d) ? { ...d, itemStyle: { ...d.itemStyle, opacity: PARTIAL_OPACITY } } : { value: d, itemStyle: { opacity: PARTIAL_OPACITY } })));
-function tooltip(fmt, bucketSeconds, { total = false, exclude = null, partial = -1 } = {}) {
+// The window starts inside its first bucket, so that bar holds only the part inside and is
+// drawn like a running bucket. From launch nothing lies before it, so there is no cut.
+export const cutsFirst = s => s?.meta?.window !== 'all' && Number(s?.meta?.from) > Number(s?.times?.[0]);
+const bucketNote = (i, partial, first) => (i === partial ? ' · in progress' : first && i === 0 ? ' · partly outside the window' : '');
+const fade = (data, at, first = false) => (at < 0 && !first ? data : data.map((d, i) => (i !== at && !(first && i === 0) ? d : d && typeof d === 'object' && !Array.isArray(d) ? { ...d, itemStyle: { ...d.itemStyle, opacity: PARTIAL_OPACITY } } : { value: d, itemStyle: { opacity: PARTIAL_OPACITY } })));
+function tooltip(fmt, bucketSeconds, { total = false, exclude = null, partial = -1, first = false } = {}) {
   return params => {
     const all = Array.isArray(params) ? params : [params];
     // A running-total line is shown on its own row, outside the per-period sum.
@@ -217,8 +221,7 @@ function tooltip(fmt, bucketSeconds, { total = false, exclude = null, partial = 
     const list = exclude ? all.filter(p => p.seriesName !== exclude) : all;
     if (!list.length) return '';
     const t = list[0].axisValue;
-    const running = partial >= 0 && list[0].dataIndex === partial ? ' · in progress' : '';
-    const head = `<div style="color:${T.faint};margin-bottom:4px">${periodLabel(t, bucketSeconds)}${running}</div>`;
+    const head = `<div style="color:${T.faint};margin-bottom:4px">${periodLabel(t, bucketSeconds)}${bucketNote(list[0].dataIndex, partial, first)}</div>`;
     const rows = list.filter(p => p.value !== null && p.value !== undefined && p.value !== 0 && p.value !== '-').sort((a, b) => Math.abs(b.value) - Math.abs(a.value)).slice(0, 10);
     const sum = list.reduce((a, p) => a + (num(p.value) ?? 0), 0);
     const ev = Array.isArray(extra?.value) ? extra.value[1] : extra?.value; // a drawn running total is [index, total, previous]
@@ -265,7 +268,7 @@ const runningTotal = (total, bars) => ({
 // Stacked bars over time (one series per market, colour follows the market).
 // cumulative: a running total of all series as a line on a right-hand axis.
 // zoom: a range slider under the chart.
-function stackedBarsNow(el, { times, series, bucketSeconds, fmt = v => usd(v), yFmt = usdAxis, cumulative = false, zoom = false }) {
+function stackedBarsNow(el, { times, series, bucketSeconds, fmt = v => usd(v), yFmt = usdAxis, cumulative = false, zoom = false, firstPartial = false }) {
   const chart = init(el);
   if (!chart) return;
   const kept = zoom ? zoomOf(chart) : null;
@@ -273,7 +276,7 @@ function stackedBarsNow(el, { times, series, bucketSeconds, fmt = v => usd(v), y
   const total = cumulative ? times.map((_, i) => (run += series.reduce((a, s) => a + (num(s.data[i]) || 0), 0))) : null;
   const partial = partialAt(times, bucketSeconds);
   const layout = { barMaxWidth: 20, barCategoryGap: '30%' };
-  const data = shown => capped(series.map(s => s.data), [3, 3, 0, 0], shown).map(d => fade(d, partial));
+  const data = shown => capped(series.map(s => s.data), [3, 3, 0, 0], shown).map(d => fade(d, partial, firstPartial));
   // A series hidden from the legend hands the rounded top to the one now outermost.
   chart.on('legendselectchanged', e => chart.setOption({ series: data(series.map(s => e.selected[s.name] !== false)).map(d => ({ data: d })) }));
   chart.setOption({
@@ -284,7 +287,7 @@ function stackedBarsNow(el, { times, series, bucketSeconds, fmt = v => usd(v), y
     // The running total's ticks fall on the bars' gridlines.
     yAxis: cumulative ? [valueAxis(yFmt), { ...valueAxis(yFmt), splitLine: { show: false }, alignTicks: true }] : valueAxis(yFmt),
     legend: { show: false, data: [...series.map(s => s.name), ...(cumulative ? [CUMULATIVE] : [])] },
-    tooltip: { ...base().tooltip, formatter: tooltip(fmt, bucketSeconds, { total: true, exclude: CUMULATIVE, partial }) },
+    tooltip: { ...base().tooltip, formatter: tooltip(fmt, bucketSeconds, { total: true, exclude: CUMULATIVE, partial, first: firstPartial }) },
     dataZoom: zoom ? zoomOptions(0, kept) : undefined,
     series: [
       ...data().map((d, i) => ({ name: series[i].name, type: 'bar', stack: 'a', data: d, itemStyle: { color: series[i].color, borderColor: T.surface, borderWidth: series.length > 1 ? 0.5 : 0 }, ...layout, emphasis: { focus: 'series' } })),
@@ -318,7 +321,7 @@ function lineChartNow(el, { times, series, bucketSeconds, fmt = v => usd(v), yFm
 
 // Positive values green, negative red (net flows, daily PnL).
 // dayTicks: irregular event times (funding) get one date label per UTC day.
-function signedBarsNow(el, { times, values, bucketSeconds, name = 'Value', fmt = v => usd(v, { sign: true }), yFmt = usdAxis, dayTicks = false }) {
+function signedBarsNow(el, { times, values, bucketSeconds, name = 'Value', fmt = v => usd(v, { sign: true }), yFmt = usdAxis, dayTicks = false, firstPartial = false }) {
   const chart = init(el);
   if (!chart) return;
   const xAxis = timeAxis(times, bucketSeconds, el);
@@ -334,14 +337,14 @@ function signedBarsNow(el, { times, values, bucketSeconds, name = 'Value', fmt =
   const partial = dayTicks ? -1 : partialAt(times, bucketSeconds); // funding events are points in time, not periods
   chart.setOption({
     ...base(), grid: { ...base().grid, right: fitRight(chart, el, times, dayTicks ? 86400 : bucketSeconds, { at }) }, xAxis, yAxis: valueAxis(yFmt),
-    tooltip: { ...base().tooltip, formatter: tooltip(fmt, bucketSeconds, { partial }) },
-    series: [{ name, type: 'bar', data: fade(values.map(v => ({ value: v, itemStyle: { color: (num(v) ?? 0) >= 0 ? T.long : T.short, borderRadius: (num(v) ?? 0) >= 0 ? [3, 3, 0, 0] : [0, 0, 3, 3] } })), partial), barMaxWidth: 18 }]
+    tooltip: { ...base().tooltip, formatter: tooltip(fmt, bucketSeconds, { partial, first: firstPartial }) },
+    series: [{ name, type: 'bar', data: fade(values.map(v => ({ value: v, itemStyle: { color: (num(v) ?? 0) >= 0 ? T.long : T.short, borderRadius: (num(v) ?? 0) >= 0 ? [3, 3, 0, 0] : [0, 0, 3, 3] } })), partial, firstPartial), barMaxWidth: 18 }]
   }, true);
 }
 
 // Two-sided bars: inflow above zero, outflow below (drawn negative), with the
 // net per period as a line (deposits vs withdrawals, taker buys vs sells).
-function twoSidedNow(el, { times, up, down, net = 'Net', bucketSeconds, fmt = v => usd(v, { sign: true }), yFmt = usdAxis }) {
+function twoSidedNow(el, { times, up, down, net = 'Net', bucketSeconds, fmt = v => usd(v, { sign: true }), yFmt = usdAxis, firstPartial = false }) {
   const chart = init(el);
   if (!chart) return;
   const upData = up.data.map(v => num(v) ?? 0), downData = down.data.map(v => -(num(v) ?? 0));
@@ -349,10 +352,10 @@ function twoSidedNow(el, { times, up, down, net = 'Net', bucketSeconds, fmt = v 
   chart.setOption({
     ...base(), grid: { ...base().grid, right: fitRight(chart, el, times, bucketSeconds) }, xAxis: timeAxis(times, bucketSeconds, el), yAxis: valueAxis(yFmt),
     legend: { show: false, data: [up.name, down.name, net] },
-    tooltip: { ...base().tooltip, formatter: tooltip(fmt, bucketSeconds, { partial }) },
+    tooltip: { ...base().tooltip, formatter: tooltip(fmt, bucketSeconds, { partial, first: firstPartial }) },
     series: [
-      { name: up.name, type: 'bar', stack: 's', data: fade(upData, partial), itemStyle: { color: up.color ?? T.long, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 18 },
-      { name: down.name, type: 'bar', stack: 's', data: fade(downData, partial), itemStyle: { color: down.color ?? T.short, borderRadius: [0, 0, 3, 3] }, barMaxWidth: 18 },
+      { name: up.name, type: 'bar', stack: 's', data: fade(upData, partial, firstPartial), itemStyle: { color: up.color ?? T.long, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 18 },
+      { name: down.name, type: 'bar', stack: 's', data: fade(downData, partial, firstPartial), itemStyle: { color: down.color ?? T.short, borderRadius: [0, 0, 3, 3] }, barMaxWidth: 18 },
       { name: net, type: 'line', data: upData.map((v, i) => v + downData[i]), symbol: 'none', lineStyle: { color: '#ffffff', width: 1.25, opacity: 0.75 }, itemStyle: { color: '#ffffff' }, z: 5 }
     ]
   }, true);
@@ -493,7 +496,7 @@ function mirroredNow(el, { labels, long, short, fmt = v => usd(v), legend = true
 
 // Open interest opened (above zero) and closed (below) per bucket, long and
 // short stacked, with the net change as a line. Closes are the paler shade.
-function flowBarsNow(el, { times, longOpen, longClose, shortOpen, shortClose, bucketSeconds, fmt = v => usd(v), yFmt = usdAxis }) {
+function flowBarsNow(el, { times, longOpen, longClose, shortOpen, shortClose, bucketSeconds, fmt = v => usd(v), yFmt = usdAxis, firstPartial = false }) {
   const chart = init(el);
   if (!chart) return;
   const partial = partialAt(times, bucketSeconds);
@@ -501,14 +504,14 @@ function flowBarsNow(el, { times, longOpen, longClose, shortOpen, shortClose, bu
   const lo = n(longOpen), lc = n(longClose), so = n(shortOpen), sc = n(shortClose);
   const net = lo.map((v, i) => v - lc[i]); // long and short open interest move together
   const opens = capped([lo, so], [3, 3, 0, 0]), closes = capped([lc.map(v => -v), sc.map(v => -v)], [0, 0, 3, 3]);
-  const bar = (name, data, color, stack) => ({ name, type: 'bar', stack, data: fade(data, partial), itemStyle: { color }, barMaxWidth: 18, emphasis: { focus: 'series' } });
+  const bar = (name, data, color, stack) => ({ name, type: 'bar', stack, data: fade(data, partial, firstPartial), itemStyle: { color }, barMaxWidth: 18, emphasis: { focus: 'series' } });
   chart.setOption({
     ...base(), grid: { ...base().grid, right: fitRight(chart, el, times, bucketSeconds) }, xAxis: timeAxis(times, bucketSeconds, el), yAxis: valueAxis(v => yFmt(Math.abs(v)) === '$0' ? '$0' : `${v < 0 ? '-' : ''}${yFmt(Math.abs(v))}`),
     legend: { show: false },
     tooltip: { ...base().tooltip, formatter: params => {
       const all = Array.isArray(params) ? params : [params];
       const i = all[0]?.dataIndex ?? 0, t = all[0]?.axisValue;
-      const head = `<div style="color:${T.faint};margin-bottom:4px">${periodLabel(t, bucketSeconds)}${i === partial ? ' · in progress' : ''}</div>`;
+      const head = `<div style="color:${T.faint};margin-bottom:4px">${periodLabel(t, bucketSeconds)}${bucketNote(i, partial, firstPartial)}</div>`;
       return head + row(T.long, 'Longs opened', fmt(lo[i])) + row(T.long + '80', 'Longs closed', fmt(lc[i])) + row(T.short, 'Shorts opened', fmt(so[i])) + row(T.short + '80', 'Shorts closed', fmt(sc[i]))
         + `<div style="border-top:1px solid ${T.border};margin-top:4px;padding-top:4px">${row('#ffffff', 'Open interest change', `${net[i] > 0 ? '+' : ''}${fmt(net[i])}`)}</div>`;
     } },

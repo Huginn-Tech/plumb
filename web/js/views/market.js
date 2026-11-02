@@ -3,7 +3,7 @@
 import { get, stream } from '../api.js';
 import { usd, usdShort, usdFull, int, price, dpOf, pct, num, esc, size, share, signClass, timeOnly, dateTime, duration } from '../format.js';
 import { kpi, seg, table, sideTag, addr, ratio, pnl, pnlShort, pctCell, fundingCell, fundingTip, tradeAction, skRows, skBox, skKpis, skChart, empty, colorOf, chartTools, logo, go, hold, morph, panelError, keepTrying, keepDots, fitRows, infoTip, DASH } from '../ui.js';
-import { candles, signedBars, mirrored, flowBars, entryProfile, dropZoom, COLORS } from '../charts.js';
+import { candles, signedBars, mirrored, flowBars, entryProfile, dropZoom, cutsFirst, COLORS } from '../charts.js';
 
 const WINDOWS = [['24h', '24H'], ['7d', '7D'], ['30d', '30D'], ['all', 'All']];
 const windowOf = q => (WINDOWS.some(([v]) => v === q.get('window')) ? q.get('window') : '24h');
@@ -155,7 +155,7 @@ export function mount(el, { params, query, setQuery }) {
     const moved = f.times.length && longOpen + num(t.short_open) + longClose + num(t.short_close);
     legendOf('flow', moved ? [{ name: 'Longs opened', color: COLORS.long }, { name: 'Longs closed', color: `${COLORS.long}80` }, { name: 'Shorts opened', color: COLORS.short }, { name: 'Shorts closed', color: `${COLORS.short}80` }, { name: 'Open interest change', color: '#ffffff' }] : []);
     if (!moved) { node.innerHTML = none('No position changes in this window'); return; }
-    flowBars(node, { times: f.times, longOpen: f.long_open, longClose: f.long_close, shortOpen: f.short_open, shortClose: f.short_close, bucketSeconds: f.meta.bucket_seconds });
+    flowBars(node, { times: f.times, firstPartial: cutsFirst(f), longOpen: f.long_open, longClose: f.long_close, shortOpen: f.short_open, shortClose: f.short_close, bucketSeconds: f.meta.bucket_seconds });
   }
   // Where the open positions were entered, from contract state.
   async function loadEntries({ fresh = false }, mine) {

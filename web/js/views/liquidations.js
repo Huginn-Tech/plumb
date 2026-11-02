@@ -3,7 +3,7 @@
 import { get, stream } from '../api.js';
 import { usd, usdShort, usdFull, int, price, dpOf, esc, dateTime, ago, num, size } from '../format.js';
 import { kpi, keepDots, infoTip, seg, table, mktLink, sideTag, addr, pnlShort, DASH, skKpis, skRows, skChart, empty, ICON, colorOf, hasColor, OTHER_HEX, assignColors, chartTools, mergeByAsset, hold, morph, panelError, keepTrying, toast } from '../ui.js';
-import { stackedBars, dropZoom } from '../charts.js';
+import { stackedBars, dropZoom, cutsFirst } from '../charts.js';
 
 const WINDOWS = [['24h', '24H'], ['7d', '7D'], ['30d', '30D'], ['all', 'All']];
 const BUCKETS = { 3600: 'Per hour', 14400: 'Per 4 hours', 86400: 'Per day', 604800: 'Per week' };
@@ -84,7 +84,7 @@ export function mount(el, { query, setQuery, keepQuery }) {
     }
     morph($('legend'), list.map(x => `<span><i style="background:${x.color}"></i>${esc(x.name)}</span>`).join('') + (list.length ? '<span><i style="background:#fff"></i>Cumulative</span>' : ''));
     morph($('chart-desc'), list.length ? keepDots(`${BUCKETS[s.meta.bucket_seconds] ?? 'Per period'}${row ? '' : ' by market'} · line: running total`) : '');
-    if (list.length) stackedBars(node, { times: s.times, series: list, bucketSeconds: s.meta.bucket_seconds, cumulative: true, zoom: true }); else node.innerHTML = empty('No liquidations in this period');
+    if (list.length) stackedBars(node, { times: s.times, series: list, bucketSeconds: s.meta.bucket_seconds, cumulative: true, zoom: true, firstPartial: cutsFirst(s) }); else node.innerHTML = empty('No liquidations in this period');
     shown.chart = filters(); undim('chart');
   }
   function renderFeed(l) {
