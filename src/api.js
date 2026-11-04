@@ -10,6 +10,8 @@ import { existsSync } from 'node:fs';
 import * as m from './math.js';
 import { metrics as computeMetrics } from './state.js';
 import { stressAt } from './metrics.js';
+import { httpScope } from './clickhouse.js';
+import { createSlot } from './ratelimit.js';
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json; charset=utf-8', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2' };
 // Third-party assets served from node_modules (self-hosted, no CDN).
@@ -41,12 +43,18 @@ const SVG_CSP = "default-src 'none'; style-src 'unsafe-inline'";
 const ACCOUNT_CACHE_MS = 15000;
 const ACCOUNT_MAX_INFLIGHT = 4;
 const ACCOUNT_MAX_QUEUED = 64;
+// A request turned away because the one slot for its kind of job is taken.
+const BUSY_RETRY_S = 5;
+// Only the API's own error codes reach a client; any other message (a
+// ClickHouse error's text, a library's) is logged and answered generically.
+const clientCode = error => (error.status && /^[A-Z][A-Z0-9_]*$/.test(error.message) ? error.message : null);
 
 export function createApi({ collector, analytics = null, sse = null, statusOf = () => ({}), onError = () => {}, reference = null, landscape = null, rateLimit = null, webDir = fileURLToPath(new URL('../web/', import.meta.url)), version = '0.2.0', now = () => Date.now() }) {
   const { state } = collector;
   const cd = () => state.exchangeInfo?.collateralDecimals ?? 6;
   const accountCache = new Map();
   const accountInflight = new Map();
+  const csvSlot = createSlot(); // one CSV export of any kind at a time
   const latestFunding = marketId => { const block = state.block?.number; for (let i = state.history.funding.length - 1; i >= 0; i--) { const f = state.history.funding[i]; if (f.perpId === marketId && (block === undefined || f.fundingEventBlock <= block)) return f; } return null; };
   const priceDec = market => market.priceDecimals;
 
@@ -228,7 +236,8 @@ export function createApi({ collector, analytics = null, sse = null, statusOf = 
   }
   function seriesView(query) {
     const hours = Math.min(Math.max(Number(query.get('hours')) || 24, 1), 168);
-    const marketId = /^\d{1,6}$/.test(query.get('market') ?? '') ? query.get('market') : null;
+    const marketId = query.get('market') || null;
+    if (marketId !== null && !(/^\d{1,6}$/.test(marketId) && state.markets.has(Number(marketId)))) throw Object.assign(new Error('UNKNOWN_MARKET'), { status: 400 });
     const since = (state.block?.timestamp ?? Math.floor(now() / 1000)) - hours * 3600;
     const c = cd();
     const points = state.series.points.filter(p => p.ts >= since).map(p => {
@@ -348,9 +357,36 @@ export function createApi({ collector, analytics = null, sse = null, statusOf = 
     for (const r of rows) r.address = map.get(Number(r.account_id))?.address ?? null;
     return rows;
   }
+  // The full status: errors, memory, ClickHouse and alert counters. The proxy
+  // keeps /health/full to local callers.
+  const healthFull = () => ({ ok: true, version, snapshot: snapshot(), collector: { polls: state.stats.polls, errors: state.stats.errors, last_error: errorCode(state.stats.lastError), last_poll_ms: state.stats.lastPollMs, uptime_ms: now() - state.stats.startedAt, rpc_requests: collector.reader.stats.requests }, ...statusOf(), memory: { rss_mb: Math.round(process.memoryUsage().rss / 1048576), heap_mb: Math.round(process.memoryUsage().heapUsed / 1048576) } });
+  // The public health: exactly what the dashboard (header, overview, status
+  // page, alerts), the uptime check and the container healthcheck read, as
+  // states and counters. No error text, memory or subscriber figures.
+  function healthPublic() {
+    const s = statusOf(), idx = s.index, feeds = s.feeds;
+    const pick = (o, keys) => (o ? Object.fromEntries(keys.map(k => [k, o[k] ?? null])) : null);
+    const index = idx ? {
+      live: pick(idx.live, ['to', 'toTs', 'finalized', 'commits', 'rows']),
+      backfill: idx.backfill ? { ...pick(idx.backfill, ['running', 'complete', 'pct', 'total_blocks', 'eta_s', 'rate_blocks_per_s']), failed: (idx.backfill.failed ?? []).map(f => ({ from: f.from, to: f.to })) } : null,
+      topics: pick(idx.topics, ['running', 'complete', 'pct', 'rate_blocks_per_s']),
+      coverage: (idx.coverage ?? []).map(x => ({ from: x.from, to: x.to })),
+      rollups: idx.rollups ? { ...pick(idx.rollups, ['hours', 'pending', 'lastRunMs']), lastError: idx.rollups.lastError ? { at: idx.rollups.lastError.at ?? null } : null } : null,
+      decoder_checks: idx.decoder_checks ? Object.fromEntries(Object.entries(idx.decoder_checks).filter(([, v]) => typeof v === 'number')) : null
+    } : undefined;
+    return {
+      ok: true, version, snapshot: snapshot(),
+      collector: { polls: state.stats.polls, rpc_requests: collector.reader.stats.requests, uptime_ms: now() - state.stats.startedAt },
+      ...(index ? { index } : {}),
+      ...(s.alerts !== undefined ? { alerts: s.alerts ? { bot: s.alerts.bot ?? null } : null } : {}),
+      ...(feeds ? { feeds: { exec_events: feeds.exec_events ? { connected: Boolean(feeds.exec_events.connected) } : null, heads: feeds.heads ? { connected: Boolean(feeds.heads.connected) } : null, sse_clients: feeds.sse_clients ?? 0 } } : {})
+    };
+  }
+
   const A = name => { if (!analytics) throw Object.assign(new Error('ANALYTICS_UNAVAILABLE'), { status: 503 }); return analytics[name]; };
   const routes = [
-    ['GET', /^\/api\/v1\/health$/, () => ({ ok: true, version, snapshot: snapshot(), collector: { polls: state.stats.polls, errors: state.stats.errors, last_error: errorCode(state.stats.lastError), last_poll_ms: state.stats.lastPollMs, uptime_ms: now() - state.stats.startedAt, rpc_requests: collector.reader.stats.requests }, ...statusOf(), memory: { rss_mb: Math.round(process.memoryUsage().rss / 1048576), heap_mb: Math.round(process.memoryUsage().heapUsed / 1048576) } })],
+    ['GET', /^\/api\/v1\/health$/, () => healthPublic()],
+    ['GET', /^\/api\/v1\/health\/full$/, () => healthFull()],
     // Protocol analytics (ClickHouse index + live contract state).
     ['GET', /^\/api\/v1\/protocol$/, (_, q) => A('protocol')(q)],
     ['GET', /^\/api\/v1\/cohorts$/, () => A('cohorts')(), risk],
@@ -452,21 +488,28 @@ export function createApi({ collector, analytics = null, sse = null, statusOf = 
   async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
     if (!url.pathname.startsWith('/api/')) return req.method === 'GET' || req.method === 'HEAD' ? serveStatic(url.pathname, req, res) : send(res, 405, { error: 'METHOD_NOT_ALLOWED' });
-    if (rateLimit && url.pathname !== '/api/v1/health') {
+    if (rateLimit) {
       const r = rateLimit.check(req, url.pathname, url.searchParams);
       if (!r.ok) return send(res, 429, { error: 'RATE_LIMITED', retry_after_s: r.retryAfterS }, { 'retry-after': String(r.retryAfterS) });
     }
     if (url.pathname === '/api/v1/stream' && req.method === 'GET') return sse ? sse.open(req, res, SECURITY_HEADERS) : send(res, 503, { error: 'STREAM_UNAVAILABLE' });
     const route = routes.find(([method, pattern]) => method === req.method && pattern.test(url.pathname));
     if (!route) return send(res, 404, { error: 'NOT_FOUND' });
+    let release = null;
     try {
       if (route[3] && (!state.block || !state.exchangeInfo)) return send(res, 503, { error: 'SYNCING', snapshot: snapshot() }, { 'retry-after': '5' });
-      send(res, 200, await route[2](url.pathname.match(route[1]), url.searchParams), {}, req);
+      // A CSV export holds its whole answer in memory: one at a time.
+      if (url.searchParams.get('format') === 'csv' && !(release = csvSlot.enter())) return send(res, 503, { error: 'BUSY', retry_after_s: BUSY_RETRY_S }, { 'retry-after': String(BUSY_RETRY_S) });
+      // ClickHouse queries made for this request run with the HTTP limits (clickhouse.js).
+      const body = await httpScope.run(true, () => route[2](url.pathname.match(route[1]), url.searchParams));
+      send(res, 200, body, {}, req);
     } catch (error) {
-      const status = error.status ?? (error.message === 'RPC_UNAVAILABLE_OR_INVALID' ? 503 : 500);
+      const code = clientCode(error);
+      const status = code ? error.status : error.message === 'RPC_UNAVAILABLE_OR_INVALID' ? 503 : 500;
       if (status === 500) onError(error, url.pathname);
-      send(res, status, { error: error.status ? error.message : status === 503 ? 'RPC_UNAVAILABLE' : 'INTERNAL_ERROR' });
-    }
+      const retry = code && error.retryAfter ? error.retryAfter : null;
+      send(res, status, { error: code ?? (status === 503 ? 'RPC_UNAVAILABLE' : 'INTERNAL_ERROR'), ...(retry ? { retry_after_s: retry } : {}) }, retry ? { 'retry-after': String(retry) } : {});
+    } finally { release?.(); }
   }
 
   return { handle, accountState, routes: routes.map(([method, pattern]) => `${method} ${pattern.source}`) };

@@ -50,6 +50,11 @@ services:
       - app-data:/data
     depends_on:
       clickhouse: { condition: service_healthy }
+    # The app needs no Linux capabilities and never gains privileges.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits: { memory: "${APP_MEMORY:-3g}" }

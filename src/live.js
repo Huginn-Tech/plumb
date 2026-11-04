@@ -16,24 +16,42 @@
 //    the block started executing here.
 import { rowsFromLogs } from './decode.js';
 
-export function createSse({ log = () => {}, heartbeatMs = 15000, maxClients = 500 } = {}) {
-  const clients = new Set();
+// Streams are capped in total and per client (clientOf, the rate limiter's
+// view of who is asking), and a client that stops reading is dropped once its
+// unsent backlog passes maxBufferedBytes instead of growing in memory.
+export function createSse({ log = () => {}, heartbeatMs = 15000, maxClients = 500, maxPerClient = 8, maxBufferedBytes = 256 * 1024, clientOf = req => req.socket?.remoteAddress ?? 'unknown' } = {}) {
+  const clients = new Map(); // res -> client key
+  const perClient = new Map(); // client key -> open streams
   let seq = 0;
-  const timer = setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, heartbeatMs);
+  function forget(res) {
+    if (!clients.has(res)) return;
+    const who = clients.get(res);
+    clients.delete(res);
+    const n = (perClient.get(who) ?? 1) - 1;
+    if (n > 0) perClient.set(who, n); else perClient.delete(who);
+  }
+  function write(res, text) {
+    try { res.write(text); } catch (error) { forget(res); log('warn', `sse write failed: ${error.message}`); return; }
+    if (res.writableLength > maxBufferedBytes) { forget(res); res.destroy(); log('warn', 'sse client dropped: not reading'); }
+  }
+  const timer = setInterval(() => { for (const res of [...clients.keys()]) write(res, ': ping\n\n'); }, heartbeatMs);
   timer.unref?.();
   function open(req, res, headers = {}) {
     if (clients.size >= maxClients) { res.writeHead(503, { 'retry-after': '10' }); res.end(); return; }
+    const who = clientOf(req);
+    if ((perClient.get(who) ?? 0) >= maxPerClient) { res.writeHead(429, { 'retry-after': '10' }); res.end(); return; }
     res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no', ...headers });
     res.write('retry: 3000\n\n');
-    clients.add(res);
-    req.on('close', () => clients.delete(res));
+    clients.set(res, who);
+    perClient.set(who, (perClient.get(who) ?? 0) + 1);
+    req.on('close', () => forget(res));
   }
   function send(event, data) {
     if (!clients.size) return;
     const text = `id: ${++seq}\nevent: ${event}\ndata: ${JSON.stringify(data, (_, v) => typeof v === 'bigint' ? v.toString() : v)}\n\n`;
-    for (const res of clients) { try { res.write(text); } catch (error) { clients.delete(res); log('warn', `sse write failed: ${error.message}`); } }
+    for (const res of [...clients.keys()]) write(res, text);
   }
-  return { open, send, get clients() { return clients.size; }, close: () => { clearInterval(timer); for (const res of clients) res.end(); clients.clear(); } };
+  return { open, send, get clients() { return clients.size; }, close: () => { clearInterval(timer); for (const res of clients.keys()) res.end(); clients.clear(); perClient.clear(); } };
 }
 
 // A WebSocket that keeps itself connected. One attempt at a time; a handshake

@@ -2,11 +2,22 @@
 // own typed parameters ({name:Type} placeholders sent as param_name), so no
 // value is ever spliced into SQL text. 64-bit integers come back as strings;
 // callers convert with BigInt or Number where the magnitude is known.
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 const DEFAULT_SETTINGS = { output_format_json_quote_64bit_integers: '1', date_time_output_format: 'unix_timestamp' };
 
+// Queries run while serving an HTTP request (api.js runs each request inside
+// httpScope) are bounded: a time and memory cap, cancelled when this client
+// gives up, and read-only for reads. The ingest, rollups and background
+// refreshes run outside the scope, unbounded.
+export const httpScope = new AsyncLocalStorage();
+export const HTTP_LIMITS = { max_execution_time: 15, max_memory_usage: 2000000000, cancel_http_readonly_queries_on_client_close: 1 };
+const HTTP_TIMEOUT_MS = 20000;
+
+// `httpStatus` is ClickHouse's own HTTP status, never one for API clients: the
+// message carries the server's error text, which belongs in the logs only.
 export class ClickHouseError extends Error {
-  constructor(message, { status = null, code = null } = {}) { super(message); this.name = 'ClickHouseError'; this.status = status; this.code = code; }
+  constructor(message, { httpStatus = null, code = null } = {}) { super(message); this.name = 'ClickHouseError'; this.httpStatus = httpStatus; this.code = code; }
 }
 
 // Encodes a JS value as a ClickHouse query-parameter literal.
@@ -22,10 +33,14 @@ export function createClickHouse({ url = 'http://127.0.0.1:8123', user = 'defaul
   if (!['http:', 'https:'].includes(base.protocol)) throw new Error('INVALID_CLICKHOUSE_URL');
   const stats = { queries: 0, inserts: 0, rowsInserted: 0, errors: 0, ms: 0 };
 
-  async function request(sql, { params = {}, body = null, settings = {}, db = database, timeout = timeoutMs } = {}) {
+  async function request(sql, { params = {}, body = null, settings = {}, db = database, timeout = timeoutMs, read = false } = {}) {
     const target = new URL(base);
     if (db) target.searchParams.set('database', db);
-    for (const [k, v] of Object.entries({ ...DEFAULT_SETTINGS, ...settings })) target.searchParams.set(k, String(v));
+    const limited = httpScope.getStore() === true;
+    // readonly=2 refuses writes and still accepts the settings sent with it; it goes last.
+    const all = { ...DEFAULT_SETTINGS, ...settings, ...(limited ? HTTP_LIMITS : {}), ...(limited && read ? { readonly: 2 } : {}) };
+    if (limited) timeout = Math.min(timeout, HTTP_TIMEOUT_MS);
+    for (const [k, v] of Object.entries(all)) target.searchParams.set(k, String(v));
     for (const [k, v] of Object.entries(params)) target.searchParams.set(`param_${k}`, paramValue(v));
     let payload = sql;
     if (body !== null) { target.searchParams.set('query', sql); payload = body; }
@@ -43,14 +58,14 @@ export function createClickHouse({ url = 'http://127.0.0.1:8123', user = 'defaul
     if (!response.ok) {
       stats.errors++;
       const code = /Code: (\d+)/.exec(text)?.[1] ?? null;
-      throw new ClickHouseError(`CLICKHOUSE_${response.status}: ${text.slice(0, 600).trim()}`, { status: response.status, code: code === null ? null : Number(code) });
+      throw new ClickHouseError(`CLICKHOUSE_${response.status}: ${text.slice(0, 600).trim()}`, { httpStatus: response.status, code: code === null ? null : Number(code) });
     }
     return text;
   }
 
   // Rows as objects (JSONEachRow).
   async function query(sql, params = {}, settings = {}) {
-    const text = await request(`${sql}\nFORMAT JSONEachRow`, { params, settings });
+    const text = await request(`${sql}\nFORMAT JSONEachRow`, { params, settings, read: true });
     const rows = [];
     let start = 0;
     while (start < text.length) {
@@ -66,7 +81,7 @@ export function createClickHouse({ url = 'http://127.0.0.1:8123', user = 'defaul
 
   // Rows as arrays (JSONCompactEachRow): much cheaper to parse for large results.
   async function queryCompact(sql, params = {}, settings = {}) {
-    const text = await request(`${sql}\nFORMAT JSONCompactEachRow`, { params, settings });
+    const text = await request(`${sql}\nFORMAT JSONCompactEachRow`, { params, settings, read: true });
     return text ? JSON.parse(`[${text.trim().split('\n').join(',')}]`) : [];
   }
 

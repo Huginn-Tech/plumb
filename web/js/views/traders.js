@@ -21,7 +21,7 @@ const epochOf = q => EPOCHS[q.get('epoch')] ?? (Object.values(EPOCHS).includes(q
 const SORTS = [['pnl', 'Top PnL'], ['loss', 'Top losses'], ['volume', 'Volume'], ['fees', 'Fees paid'], ['liquidated', 'Liquidated'], ['net_flow', 'Net inflow'], ['deposits', 'Deposits'], ['withdrawals', 'Withdrawals']];
 const FLOW_SORTS = new Set(['net_flow', 'deposits', 'withdrawals']);
 const rankOf = q => (SORTS.some(([v]) => v === q.get('by')) ? q.get('by') : 'pnl');
-const pageOf = q => Math.max(0, Math.floor(Number(q.get('page'))) - 1 || 0);
+const pageOf = q => Math.min(Math.max(0, Math.floor(Number(q.get('page'))) - 1 || 0), MAX_PAGES - 1);
 // What each ranking orders the board by, and the column that carries the band.
 const RANKED = { pnl: 'net PnL', loss: 'largest net loss', volume: 'volume', fees: 'fees paid', liquidated: 'notional liquidated', net_flow: 'net inflow', deposits: 'deposits', withdrawals: 'withdrawals' };
 const RANKED_COL = { pnl: 'pnl', loss: 'pnl', volume: 'volume', fees: 'fees', liquidated: 'liq', net_flow: 'net', deposits: 'dep', withdrawals: 'wd' };
@@ -38,6 +38,8 @@ const SM_WINDOWS = [['7d', '7D'], ['30d', '30D'], ['all', 'All']];
 const SM_SIZES = [['100', '≥$100'], ['1000', '≥$1K'], ['10000', '≥$10K']];
 const known = (list, v, fallback) => (list.some(([k]) => k === v) ? v : fallback);
 const LIMIT = 20, SM_ROWS = 12;
+// The API starts a page at most 5,000 accounts down (MAX_OFFSET in analytics-api.js).
+const MAX_PAGES = 5000 / LIMIT + 1;
 // Cohort rules, by the API's key: the API's own text is shorter and names no period.
 const RULES = { whale: '≥ $100K notional', dolphin: '$10K–100K notional', fish: '$1K–10K notional', shrimp: '< $1K notional', top: '≥ +$10K all-time', winner: '$0 to +$10K all-time', loser: '-$10K to $0 all-time', rekt: '≤ -$10K all-time' };
 const CO_SIZE_DESC = "Open positions now, grouped by each trader's total open notional · click a cohort for its traders";
@@ -159,7 +161,7 @@ export function mount(el, { query, setQuery, keepQuery }) {
   const epochTimer = setInterval(() => { if (!data || ep !== 'this_epoch' || unhold) return; if (Date.now() / 1000 >= data.meta.from + 7 * 86400) load({ quiet: true, maxAge: 0 }).catch(() => {}); else renderMeta(); }, 10000);
   // Prev is off on the first page and Next on the last; one page needs neither, nor
   // does a filter that found nothing here.
-  const pages = () => Math.max(1, Math.ceil((data?.total ?? 0) / LIMIT));
+  const pages = () => Math.max(1, Math.min(Math.ceil((data?.total ?? 0) / LIMIT), MAX_PAGES));
   function renderPager(hidden = false) { const n = pages(); morph($('pager'), n > 1 && !hidden ? `<button class="btn ghost sm" data-action="prev" ${page === 0 ? 'disabled' : ''}>← Prev</button><span class="num">Page ${int(page + 1)} of ${int(n)}</span><button class="btn ghost sm" data-action="next" ${page + 1 >= n ? 'disabled' : ''}>Next →</button>` : ''); }
   // The press is kept in the address, so Back returns to this page of the board.
   function goTo(n) { page = n; keepQuery({ page: n ? n + 1 : null }); renderPager(); board(); }

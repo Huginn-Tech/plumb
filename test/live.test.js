@@ -56,6 +56,60 @@ test('server-sent events reach every open client in order', () => {
   sse.close();
 });
 
+// A stream end point that records its status and lets the test close it.
+function stream(peer, { buffered = 0 } = {}) {
+  const closers = [];
+  const req = { socket: { remoteAddress: peer }, on: (event, fn) => { if (event === 'close') closers.push(fn); } };
+  const res = { status: null, ended: false, destroyed: false, writableLength: buffered, writeHead(code) { this.status = code; }, write() {}, end() { this.ended = true; }, destroy() { this.destroyed = true; } };
+  return { req, res, close: () => closers.forEach(fn => fn()) };
+}
+
+test('server-sent events: each client gets a few streams, and a closed stream frees its slot', () => {
+  const sse = createSse({ heartbeatMs: 60000, maxPerClient: 8 });
+  const mine = Array.from({ length: 8 }, () => stream('203.0.113.7'));
+  for (const s of mine) sse.open(s.req, s.res);
+  assert.ok(mine.every(s => s.res.status === 200));
+  const ninth = stream('203.0.113.7');
+  sse.open(ninth.req, ninth.res);
+  assert.equal(ninth.res.status, 429, 'the ninth stream from one client is refused');
+  assert.ok(ninth.res.ended);
+  const other = stream('198.51.100.2');
+  sse.open(other.req, other.res);
+  assert.equal(other.res.status, 200, 'other clients are not affected');
+  assert.equal(sse.clients, 9);
+  mine[0].close();
+  mine[0].close(); // a second close event changes nothing
+  const again = stream('203.0.113.7');
+  sse.open(again.req, again.res);
+  assert.equal(again.res.status, 200, 'a closed stream frees its slot');
+  assert.equal(sse.clients, 9);
+  sse.close();
+});
+
+test('server-sent events: the total cap still applies, and the per-client key comes from clientOf', () => {
+  const sse = createSse({ heartbeatMs: 60000, maxClients: 3, maxPerClient: 2, clientOf: req => req.headers.who });
+  const open = who => { const s = stream('127.0.0.1'); s.req.headers = { who }; sse.open(s.req, s.res); return s.res.status; };
+  assert.deepEqual([open('a'), open('a'), open('a'), open('b'), open('c')], [200, 200, 429, 200, 503]);
+  sse.close();
+});
+
+test('server-sent events: a client that stops reading is dropped once its backlog passes the limit', () => {
+  const sse = createSse({ heartbeatMs: 60000, maxBufferedBytes: 1000 });
+  const slow = stream('203.0.113.7', { buffered: 0 }), fast = stream('198.51.100.2');
+  sse.open(slow.req, slow.res);
+  sse.open(fast.req, fast.res);
+  sse.send('block', { block: 1 });
+  assert.equal(sse.clients, 2);
+  slow.res.writableLength = 300 * 1024;
+  sse.send('block', { block: 2 });
+  assert.ok(slow.res.destroyed, 'the stalled stream is closed');
+  assert.ok(!fast.res.destroyed);
+  assert.equal(sse.clients, 1);
+  slow.close(); // its close event after the drop is harmless
+  assert.equal(sse.clients, 1);
+  sse.close();
+});
+
 // A fake WebSocket and clock for the reconnect layer.
 function fakeSockets() {
   const made = [];

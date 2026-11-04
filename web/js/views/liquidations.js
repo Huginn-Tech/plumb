@@ -10,8 +10,10 @@ const BUCKETS = { 3600: 'Per hour', 14400: 'Per 4 hours', 86400: 'Per day', 6048
 const DEFAULT_WINDOW = '30d';
 // The feed pages through every event of the window, newest first, fifty at a time.
 const PAGE = 50;
+// The API starts a page at most 5,000 events down (MAX_OFFSET in analytics-api.js).
+const MAX_PAGES = 5000 / PAGE + 1;
 const windowOf = q => (WINDOWS.some(([v]) => v === q.get('window')) ? q.get('window') : DEFAULT_WINDOW);
-const pageOf = q => Math.max(0, (parseInt(q.get('page'), 10) || 1) - 1);
+const pageOf = q => Math.min(Math.max(0, (parseInt(q.get('page'), 10) || 1) - 1), MAX_PAGES - 1);
 // What the API says goes unprinted (panelError has its own words); a bug in this file does not.
 // A table or note amount: the short form, with the exact figure as its note.
 const amt = v => (num(v) === null ? DASH : `<span class="amt" title="${esc(usdFull(v))}">${usdShort(v)}</span>`);
@@ -88,7 +90,7 @@ export function mount(el, { query, setQuery, keepQuery }) {
     shown.chart = filters(); undim('chart');
   }
   function renderFeed(l) {
-    const rows = l.rows, total = l.total ?? rows.length, pages = Math.max(1, Math.ceil(total / PAGE));
+    const rows = l.rows, total = l.total ?? rows.length, pages = Math.max(1, Math.min(Math.ceil(total / PAGE), MAX_PAGES));
     // The feed has ADL and force closes too, so it runs longer than the liquidation
     // count above. A redraw under filters not yet loaded leaves the count out.
     const n = adl?.key === filters() ? adl.n : null;
@@ -128,7 +130,7 @@ export function mount(el, { query, setQuery, keepQuery }) {
     }
     // A page past the end, from an old link or a window that shrank, opens on the last page.
     if (l && page && !l.rows.length && l.total) {
-      page = Math.ceil(l.total / PAGE) - 1;
+      page = Math.min(Math.ceil(l.total / PAGE), MAX_PAGES) - 1;
       keepQuery({ page: page ? page + 1 : null });
       l = await get(feedPath(), opt);
       if (!alive || ask !== seq) return;

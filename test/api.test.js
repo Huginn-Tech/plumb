@@ -8,10 +8,12 @@ import { createCollector, collectorOptions } from '../src/collector.js';
 import { createApi } from '../src/api.js';
 import { createReference } from '../src/reference.js';
 import { createFakeExchange, EXCHANGE } from './helpers/fake-exchange.js';
+import { createRateLimiter } from '../src/ratelimit.js';
+import { ClickHouseError } from '../src/clickhouse.js';
 
 const config = { url: 'https://example.invalid', chain: '143', exchange: EXCHANGE };
 
-async function setup(t) {
+async function setup(t, extra = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'perpl-api-'));
   const webDir = join(dir, 'web'); await mkdir(webDir); await writeFile(join(webDir, 'index.html'), '<!doctype html><title>Plumb</title>');
   const fake = createFakeExchange();
@@ -20,7 +22,7 @@ async function setup(t) {
   const collector = createCollector({ config, options: { ...collectorOptions({ BACKFILL_BLOCKS: 100, FUNDING_HISTORY_EVENTS: 1, HEAD_TAG: 'latest', MAX_BLOCK_AGE_MS: 0 }), checkpointPath: join(dir, 'cp.json') }, rpc: fake.rpc });
   const reference = createReference({ fetcher: async () => new Response(JSON.stringify({ chain: { chain_id: 143 }, markets: [{ perpetual_id: 1, name: 'BTC', config: { is_open: true, price_decimals: 1, size_decimals: 5, initial_margin: 1500, maintenance_margin: 2500 }, state: { mrk: 1000000, oi: 100000, at: { b: 1000 } }, funding: { rate: -40, sum: -35673, feb: 999 } }] })) });
   await reference.refresh();
-  const api = createApi({ collector, reference, webDir, version: 'test' });
+  const api = createApi({ collector, reference, webDir, version: 'test', ...extra });
   const server = createServer((req, res) => api.handle(req, res));
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -190,4 +192,91 @@ test('audit fixes: cached account record, csv headers, sort validation, headers'
   assert.equal(book.body.liquidity.absorption.find(r => r.shock_pct === 10).beyond_range, false);
   const page = await fetch(base + '/');
   assert.match(page.headers.get('content-security-policy'), /script-src 'self'/);
+});
+
+test('health: a small public body without error text; the full status at /health/full', async t => {
+  const statusOf = () => ({
+    index: {
+      live: { to: 10, toTs: 1790000000, finalized: 9, commits: 3, rows: 4, lastError: 'CLICKHOUSE_500: Code: 60. DB::Exception' },
+      backfill: { running: false, complete: true, pct: 100, total_blocks: 5, eta_s: null, rate_blocks_per_s: 1, failed: [{ from: 1, to: 2, message: 'Code: 241. Memory limit exceeded' }], last_error: { message: 'boom', at: 1 } },
+      topics: { running: false, complete: true, pct: 100, rate_blocks_per_s: 2 },
+      coverage: [{ from: 1, to: 10, source: 'archive' }],
+      rollups: { hours: 3, pending: 0, lastRunMs: 5, lastError: { message: 'Code: 60. Table missing', at: 7 } },
+      decoder_checks: { checked: 4, note: 'free text' }
+    },
+    alerts: { bot: 'plumb_bot', chats: 12, sent: 40 },
+    feeds: { exec_events: { connected: true, lastError: 'ECONNREFUSED 10.0.0.5' }, heads: null, sse_clients: 2 },
+    clickhouse: { queries: 1, errors: 1 }
+  });
+  const { get } = await setup(t, { statusOf });
+  const pub = await get('/api/v1/health');
+  assert.equal(pub.status, 200);
+  assert.deepEqual(Object.keys(pub.body).sort(), ['alerts', 'collector', 'feeds', 'index', 'ok', 'snapshot', 'version']);
+  assert.deepEqual(Object.keys(pub.body.collector).sort(), ['polls', 'rpc_requests', 'uptime_ms']);
+  assert.equal(pub.body.index.live.to, 10);
+  assert.equal(pub.body.index.backfill.complete, true);
+  assert.deepEqual(pub.body.index.backfill.failed, [{ from: 1, to: 2 }]);
+  assert.deepEqual(pub.body.index.coverage, [{ from: 1, to: 10 }]);
+  assert.deepEqual(pub.body.index.rollups.lastError, { at: 7 }, 'the status page still sees that a rollup failed');
+  assert.deepEqual(pub.body.index.decoder_checks, { checked: 4 });
+  assert.deepEqual(pub.body.alerts, { bot: 'plumb_bot' });
+  assert.deepEqual(pub.body.feeds, { exec_events: { connected: true }, heads: null, sse_clients: 2 });
+  const text = JSON.stringify(pub.body);
+  for (const leak of ['Code:', 'boom', 'ECONNREFUSED', 'Memory', 'free text', 'chats', 'memory', 'clickhouse']) assert.ok(!text.includes(leak), leak);
+  const full = await get('/api/v1/health/full');
+  assert.equal(full.status, 200);
+  assert.ok(full.body.memory.rss_mb > 0);
+  assert.equal(full.body.alerts.chats, 12);
+  assert.equal(full.body.clickhouse.errors, 1);
+  assert.ok('errors' in full.body.collector);
+});
+
+test('health is rate limited like any other read', async t => {
+  const { get } = await setup(t, { rateLimit: createRateLimiter({ perMinute: 60, burst: 2, now: () => 0 }) });
+  assert.equal((await get('/api/v1/health')).status, 200);
+  assert.equal((await get('/api/v1/health')).status, 200);
+  const third = await get('/api/v1/health');
+  assert.equal(third.status, 429);
+  assert.equal(third.body.error, 'RATE_LIMITED');
+});
+
+test('one CSV export at a time; a failed export frees the slot and its database error stays in the log', async t => {
+  let entered, open;
+  const called = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { open = resolve; });
+  const logged = [];
+  const analytics = {
+    leaderboard: async () => { entered(); await gate; return { rows: [{ account_id: '1', markets: [1, 20] }], meta: { window: '7d', sort: 'pnl' } }; },
+    liquidations: async () => ({ rows: [{ account_id: '2' }], meta: { block: 5 } }),
+    walletTrades: async () => { throw new ClickHouseError('CLICKHOUSE_500: Code: 241. DB::Exception: Memory limit (for query) exceeded', { httpStatus: 500, code: 241 }); }
+  };
+  const { get, base } = await setup(t, { analytics, onError: (error, path) => logged.push(`${path}: ${error.message}`) });
+  const first = fetch(base + '/api/v1/leaderboard?format=csv');
+  await called;
+  const second = await get('/api/v1/liquidations?format=csv');
+  assert.equal(second.status, 503);
+  assert.deepEqual(second.body, { error: 'BUSY', retry_after_s: 5 });
+  assert.equal(second.headers.get('retry-after'), '5');
+  assert.equal((await get('/api/v1/liquidations')).status, 200, 'JSON reads are not held up');
+  open();
+  const done = await first;
+  assert.equal(done.status, 200);
+  assert.match(await done.text(), /^account_id,markets\r\n1,1 20/);
+  const failed = await get('/api/v1/wallets/7/trades?format=csv');
+  assert.equal(failed.status, 500);
+  assert.deepEqual(failed.body, { error: 'INTERNAL_ERROR' }, 'no database text reaches the client');
+  assert.match(logged.join('\n'), /wallets\/7\/trades: CLICKHOUSE_500: Code: 241/);
+  assert.equal((await get('/api/v1/liquidations?format=csv')).status, 200, 'the slot is free again');
+});
+
+test('a market that does not exist is refused', async t => {
+  const { collector, get } = await setup(t);
+  await collector.bootstrap('test');
+  for (const market of ['99', 'abc', '1e3', '-1', '__proto__', '0001234567']) {
+    const r = await get(`/api/v1/series?market=${market}`);
+    assert.equal(r.status, 400, market);
+    assert.equal(r.body.error, 'UNKNOWN_MARKET');
+  }
+  assert.equal((await get('/api/v1/series?market=1')).status, 200);
+  assert.equal((await get('/api/v1/series?market=')).status, 200, 'empty means every market');
 });

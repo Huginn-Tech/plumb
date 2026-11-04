@@ -270,3 +270,77 @@ test('a blocked chat is dropped', async () => {
   await alerts.save();
   assert.deepEqual(saved.subs, {});
 });
+
+test('a warning-level button accepts only the three presets', async () => {
+  const h = harness();
+  for (const arg of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+    const [screen, toast] = await h.alerts.press('1', `levels:${arg}`);
+    assert.match(text(screen), /Liquidation warnings/, arg);
+    assert.equal(toast, undefined);
+  }
+  assert.equal(h.alerts.subs()['1'], undefined, 'nothing stored');
+  await h.alerts.handle('1', '/watch 7');
+  assert.match(text(await h.alerts.handle('1', '/menu')), /warnings at 10%, 5% from liquidation/);
+});
+
+test('a saved warning preset that is not a known one falls back to the default on load', async () => {
+  const saved = { subs: { 42: { wallets: { 7: ADDR }, liqs: null, trades: null, funding: false, levels: '__proto__' }, 43: { wallets: { 7: ADDR }, liqs: null, trades: null, funding: false, levels: 'late' } }, offset: 5 };
+  const alerts = createAlerts({
+    token: 'T', sendGapMs: 0, now: () => NOW * 1000, fetch: async () => ({ json: async () => ({ ok: true, result: [] }) }),
+    store: { load: async () => structuredClone(saved), save: async () => {} },
+    resolveAccount: async () => null, tradeViews: async () => [], accountState: async () => ({ positions: [] })
+  });
+  await alerts.load();
+  assert.equal(alerts.subs()['42'].levels, undefined);
+  assert.equal(alerts.subs()['43'].levels, 'late', 'a known preset is kept');
+  assert.match(text(await alerts.handle('42', '/menu')), /warnings at 10%, 5% from liquidation/);
+  assert.match(text(await alerts.handle('43', '/menu')), /warnings at 5%, 2% from liquidation/);
+});
+
+test('risk check: one account with unusable state does not stop the warnings for the others', async () => {
+  const sent = [], warnings = [];
+  const alerts = createAlerts({
+    token: 'T', sendGapMs: 0, now: () => NOW * 1000, log: (level, message) => warnings.push(message),
+    fetch: async (url, init) => { if (url.endsWith('/sendMessage')) sent.push(JSON.parse(init.body)); return { json: async () => ({ ok: true, result: {} }) }; },
+    store: { load: async () => null, save: async () => {} },
+    resolveAccount: async key => ({ id: Number(key), address: null }), tradeViews: async () => [],
+    // Account 7 reports its distance as text, which the warning cannot format.
+    accountState: async id => ({ positions: [pos(id === 7 ? '3' : 3)] })
+  });
+  await alerts.handle('1', '/watch 7');
+  await alerts.handle('1', '/watch 8');
+  await alerts.checkRisk();
+  await new Promise(r => setTimeout(r, 50));
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /near liquidation[\s\S]*#8/);
+  assert.ok(warnings.some(m => /risk check of account 7 failed/.test(m)));
+});
+
+test('a chat that sends too many updates is ignored for a while; other chats are not', async () => {
+  const h = harness();
+  for (let i = 0; i < 25; i++) h.msg('/list', 42);
+  h.tap('menu', 42);
+  h.msg('/list', 43);
+  await h.alerts.pollOnce();
+  await h.until(() => h.sent.length >= 21);
+  await h.flush();
+  assert.equal(h.sent.filter(m => m.chat_id === '42').length, 20, 'twenty a minute from one chat');
+  assert.equal(h.edited.length, 0, 'a button tap over the limit is dropped too');
+  assert.equal(h.sent.filter(m => m.chat_id === '43').length, 1);
+  assert.equal(h.alerts.stats.throttled, 6);
+  h.advance(60);
+  h.msg('/list', 42);
+  await h.alerts.pollOnce(); await h.until(() => h.sent.length >= 22);
+  assert.equal(h.sent.length, 22, 'served again after the minute');
+});
+
+test('subscriptions are saved when they change, not on every poll', async () => {
+  const h = harness();
+  h.msg('/list'); h.msg('/menu');
+  await h.alerts.pollOnce(); await h.flush();
+  assert.equal(h.saved(), null, 'reading commands write nothing');
+  h.msg('/funding');
+  await h.alerts.pollOnce(); await h.flush();
+  assert.equal(h.saved().subs['42'].funding, true);
+  assert.equal(h.saved().offset, 103, 'the offset goes along with a change');
+});

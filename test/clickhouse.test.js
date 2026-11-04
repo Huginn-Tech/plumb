@@ -5,7 +5,7 @@
 // that restarts never duplicate rows.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createClickHouse } from '../src/clickhouse.js';
+import { createClickHouse, httpScope } from '../src/clickhouse.js';
 import { migrate, DDL, KINDS, kindEnum } from '../src/schema.js';
 import { REVENUE_COLUMNS } from '../src/aggregates.js';
 import { rowRevenue, protocolBalance } from '../src/revenue.js';
@@ -199,4 +199,35 @@ test('protocol transfers: enum migration in place, topic backfill once, balance 
   await restarted.topicBackfill();
   assert.equal(restarted.status.topics.requests, requests);
   assert.equal(await rebuilt(), want);
+});
+
+test('queries made while serving a request carry the HTTP limits; reads are read-only', async () => {
+  const seen = [];
+  const ch = createClickHouse({ fetcher: async target => { seen.push(new URL(target).searchParams); return new Response(''); } });
+  await ch.query('SELECT 1');
+  await httpScope.run(true, async () => { await ch.query('SELECT 1'); await ch.insert('accounts', [{ account: 1 }]); });
+  await ch.exec('SELECT 1');
+  const [outside, read, write, after] = seen;
+  for (const k of ['max_execution_time', 'max_memory_usage', 'cancel_http_readonly_queries_on_client_close', 'readonly']) {
+    assert.equal(outside.get(k), null, k);
+    assert.equal(after.get(k), null, `${k} after the request`);
+  }
+  assert.equal(read.get('max_execution_time'), '15');
+  assert.equal(read.get('max_memory_usage'), '2000000000');
+  assert.equal(read.get('cancel_http_readonly_queries_on_client_close'), '1');
+  assert.equal(read.get('readonly'), '2');
+  assert.equal(write.get('max_execution_time'), '15', 'a write made for a request is bounded too');
+  assert.equal(write.get('readonly'), null, 'and allowed');
+});
+
+test('ClickHouse accepts the HTTP limits', { skip: !url && 'set CLICKHOUSE_URL to run' }, async () => {
+  const ch = createClickHouse({ url, user: process.env.CLICKHOUSE_USER || 'default', password: process.env.CLICKHOUSE_PASSWORD || '', database: null });
+  const settings = "SELECT getSetting('max_execution_time') AS t, getSetting('max_memory_usage') AS mem, getSetting('readonly') AS ro, getSetting('cancel_http_readonly_queries_on_client_close') AS cancel";
+  const row = await httpScope.run(true, () => ch.first(settings));
+  assert.equal(Number(row.t), 15);
+  assert.equal(Number(row.mem), 2000000000);
+  assert.equal(Number(row.ro), 2);
+  assert.equal(Number(row.cancel), 1);
+  await assert.rejects(httpScope.run(true, () => ch.request('CREATE TABLE plumb_readonly_probe (x UInt8) ENGINE = Memory', { read: true })), /Code: 164/, 'a read-only request cannot write');
+  assert.equal(Number((await ch.first(settings)).ro), 0, 'outside a request nothing changes');
 });

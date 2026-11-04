@@ -14,7 +14,7 @@ import { createSse, createExecEvents, createHeadSubscription, speculativeTrades 
 import { createSnapshots } from './snapshots.js';
 import { createReference } from './reference.js';
 import { createApi } from './api.js';
-import { rateLimitFromEnv } from './ratelimit.js';
+import { clientOf, proxyTrustFromEnv, rateLimitFromEnv } from './ratelimit.js';
 import { createLandscape } from './landscape.js';
 import { createAlerts, kvStore } from './alerts.js';
 
@@ -23,6 +23,8 @@ const log = (level, message) => console.log(JSON.stringify({ t: new Date().toISO
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const config = configuration(env);
+// Who the client is behind a proxy (TRUSTED_PROXIES), for rate limits and stream caps; a bad list stops the start.
+const trust = proxyTrustFromEnv(env);
 
 // --- storage ---------------------------------------------------------------
 const ch = createClickHouse({ url: env.CLICKHOUSE_URL || 'http://127.0.0.1:8123', user: env.CLICKHOUSE_USER || 'default', password: env.CLICKHOUSE_PASSWORD || '', database: env.CLICKHOUSE_DB || 'perpl', log });
@@ -42,7 +44,7 @@ await rollups.load();
 const queries = createQueries({ ch, rollups, coverage: ingest.coverage, rates: ingest.revenueParams });
 
 // --- API -------------------------------------------------------------------
-const sse = createSse({ log });
+const sse = createSse({ log, clientOf: req => clientOf(req, trust) });
 let api = null;
 const analytics = createAnalyticsApi({ ch, ingest, rollups, queries, collector, accountState: id => api.accountState(id) });
 const reference = env.REFERENCE_ENABLED === '1' ? createReference({ url: env.PERPL_CONTEXT_URL || undefined }) : null;
@@ -62,7 +64,7 @@ const statusOf = () => ({
   alerts: alerts ? { bot: alerts.stats.bot ?? null, chats: alerts.stats.chats, sent: alerts.stats.sent, failed: alerts.stats.failed } : null,
   feeds: { exec_events: feeds.execEvents?.status ?? null, heads: feeds.heads?.status ?? null, sse_clients: sse.clients }
 });
-api = createApi({ collector, analytics, sse, statusOf, reference, landscape, rateLimit: rateLimitFromEnv(env), version: pkg.version, onError: (error, path) => log('error', `${path}: ${error.message}`) });
+api = createApi({ collector, analytics, sse, statusOf, reference, landscape, rateLimit: rateLimitFromEnv(env, trust), version: pkg.version, onError: (error, path) => log('error', `${path}: ${error.message}`) });
 
 // --- real-time -----------------------------------------------------------------
 let lastPush = 0, pushTimer = null, lastRollup = 0, pushing = false;
@@ -106,7 +108,7 @@ const snapshots = createSnapshots({ ch, collector, log });
 collector.on(() => snapshots.maybeRecord());
 
 // --- serve -------------------------------------------------------------------
-const port = Number(env.PORT || 8787), host = env.HOST || '0.0.0.0';
+const port = Number(env.PORT || 8787), host = env.HOST || '127.0.0.1'; // the container image sets HOST=0.0.0.0
 const server = createServer((req, res) => { api.handle(req, res).catch(error => { log('error', `request failed: ${error.message}`); if (!res.headersSent) { res.writeHead(500); res.end(); } }); });
 server.listen(port, host, () => log('info', `plumb ${pkg.version} listening on ${host}:${port} (chain ${config.chain})`));
 reference?.start();
