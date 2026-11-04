@@ -13,14 +13,22 @@ contract block, hash, block time, contract version, status (with a reason
 when stale) and the age of both the last poll (`age_ms`) and the block
 (`block_age_ms`).
 
-Errors: `{ "error": "CODE" }` with 400 (bad parameter), 404 (unknown market,
-account or route), 429 (`RATE_LIMITED`, with `retry-after`) or 503 (`SYNCING`
-before the first contract snapshot).
+Errors: `{ "error": "CODE" }` with 400 (bad parameter; `UNKNOWN_MARKET` for
+a `market` that names no listed market), 404 (unknown market, account or
+route), 429 (`RATE_LIMITED`, with `retry-after`), 500 (`INTERNAL_ERROR`; the
+details stay in the server log) or 503 (`SYNCING` before the first contract
+snapshot; `BUSY`, with `retry_after_s` and `retry-after`, while another CSV
+export or past-block balance check runs: one runs at a time).
+
+Paged lists (`/liquidations`, `/leaderboard`) start at most at `offset` 5,000;
+a larger offset is served from 5,000.
 
 Rate limit: each client IP has a token bucket (default 600 requests a minute,
-bursts of 120). A plain read costs 1, first-load wallet analytics 3, CSV
-exports and `/compare` 10; `/health` is free. Behind a reverse proxy on the
-same host the client is the last `X-Forwarded-For` entry.
+bursts of 120). A plain read, `/health` included, costs 1, first-load wallet
+analytics 3, CSV exports and `/compare` 10. The client is the last
+`X-Forwarded-For` entry when the request comes from loopback or from a proxy
+named in `TRUSTED_PROXIES`, otherwise the peer address. `/stream` allows 8
+open streams per client (429 beyond) and 500 in all (503).
 
 ## Protocol
 
@@ -44,14 +52,15 @@ same host the client is the last `X-Forwarded-For` entry.
 | `/api/v1/wallets/:key` | | `account` (id, address, creation time); `summary` (all-time volume, trades, realized, fees, net PnL, funding, liquidations, deposits, withdrawals, first and last trade, active days, maker share, `payouts_received` and `payout_count` (paid to the account from the protocol balance), `swept_to_protocol`); `markets[]`; `pnl_daily[]` (net and cumulative); `recent_trades[]`; `flows[]` (kinds `deposit`, `withdrawal`, `payout`, `sweep`); `portfolio` (contract `block`; `balance`, which includes what open orders lock; `available_balance`; `locked_balance`; position margin; account value = balance + equity of open positions; unrealized PnL; margin usage; leverage; closest liquidation) and `positions[]`, both at the same block |
 | `/api/v1/wallets/:key/analytics` | | `performance` over closed round trips: win rate, profit factor, expectancy, largest win and loss, max drawdown with dates, streaks, hold times (all, winners, losers), long and short splits, best and worst market, per-market results; `insights[]` (rule-based); `activity` (weekday × hour); `trip_curve`; `trips[]` (latest 200) and `open_trips[]`. `performance.based_on` says how many events were used |
 | `/api/v1/wallets/:key/periods` | | For 24h, 7d, 30d, all time, this epoch and last epoch (with `from` and `to`): volume, maker and taker volume, share of the exchange volume, maker share, trades, net PnL, realized, fees, funding, liquidations, PnL per volume (bps) and `rank` by PnL and by volume among every account that traded in that window For the epochs, `blocks` (first and last block with exchange events); for the epoch under way, `rank.volume_to_next` and `rank.next_rank`. |
-| `/api/v1/wallets/:key/trades` | `before` = `block:log_index` cursor, `limit` ≤ 500 (10,000 as CSV), `market`, `from` and `to` (unix seconds, a range such as an epoch; up to 100,000 as CSV), `format=csv` | Every position change with the price, size and fee of the fill that settled it, role, realized PnL and remaining size; `next` cursor |
-| `/api/v1/compare` | `wallets` = up to ten keys, comma-separated | Profile and performance of each wallet |
+| `/api/v1/wallets/:key/trades` | `before` = `block:log_index` cursor, `limit` ≤ 500 (10,000 as CSV), `market`, `from` and `to` (unix seconds, a range such as an epoch; up to 20,000 as CSV), `format=csv` | Every position change with the price, size and fee of the fill that settled it, role, realized PnL and remaining size; `next` cursor |
+| `/api/v1/compare` | `wallets` = up to five keys, comma-separated | Profile and performance of each wallet |
 
 ## Pipeline and integrity
 
 | Route | Returns |
 | --- | --- |
-| `/api/v1/health` | Liveness (200). Collector snapshot and status. `alerts` (bot username, chats, messages sent) when the Telegram bot runs. `index.live` (last committed block, commits, errors). `index.backfill` (progress, rate, ETA). `index.topics`: the topic backfill of the protocol balance transfers (`complete`, `pct`, rate, ETA, failed ranges). `index.coverage` intervals, `index.rollups`, `index.decoder_checks`. `feeds` (execution events, WebSocket heads, SSE clients). Memory |
+| `/api/v1/health` | Liveness (200), states and counters only. Collector snapshot, polls, RPC requests and uptime. `alerts.bot` (the bot username) when the Telegram bot runs. `index.live` (last committed block and its time, finalized block, commits, rows). `index.backfill` (`running`, `complete`, `pct`, total blocks, rate, ETA, `failed` ranges as `from`/`to`). `index.topics`: the topic backfill of the protocol balance transfers (`running`, `complete`, `pct`, rate). `index.coverage` intervals, `index.rollups` (hours, pending, last run, `lastError.at` when the last run failed), `index.decoder_checks` counters. `feeds` (execution events and WebSocket heads `connected`, SSE clients) |
+| `/api/v1/health/full` | Everything above with the error texts, ClickHouse and alert counters and memory. For the operator: the reverse proxy keeps it to local callers |
 | `/api/v1/integrity` | Event-derived open interest per market and net collateral flow compared with the contract's counters and balance at the collector's block (available once history is complete). `protocol_balance`: the protocol balance rebuilt from launch (`events`) against the contract (`contract`), `difference`, `status` (`match`, `differs`, or `pending` with `scanned_pct` while the topic backfill runs), `revenue` by source, `moves` per transfer kind (amount, count, sign; kinds: `protocol_deposit`, `protocol_withdrawal`, `payout`, `sweep`, `insurance_to_protocol`, `positions_to_protocol`, `protocol_to_market`, `protocol_to_recycle`, `recycle_fee`, `residue_to_protocol`) and `unverified` (off-book liquidations, split applied but the rule not yet seen onchain, their fees; buy-to-liquidate settlements) |
 | `/api/v1/integrity/protocol` | `block` (an indexed block) | The same `protocol_balance` comparison at that block, with the contract read at that block from the node or an archive: finds where a difference appears |
 | `/api/v1/stream` | Server-sent events: `block`, `trades`, `proposed`, `liquidations`, `protocol`, `backfill` (see `docs/architecture.md`) |

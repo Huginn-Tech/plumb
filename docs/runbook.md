@@ -39,11 +39,14 @@ curl -s localhost:8787/api/v1/health | jq '.index.backfill | {pct, eta_s, rate_b
 ```
 
 The app is published on `127.0.0.1:8787` only. Put a TLS reverse proxy in
-front of it. Server-sent events (`/api/v1/stream`) must not be buffered:
+front of it. Server-sent events (`/api/v1/stream`) must not be buffered. The
+proxy appends the client address to `X-Forwarded-For` (the app takes the last
+entry for its rate limits) and keeps `/api/v1/health/full` to local callers:
 
 ```caddy
 plumb.example.com {
 	encode gzip
+	respond /api/v1/health/full 404
 	reverse_proxy 127.0.0.1:8787 {
 		flush_interval -1
 	}
@@ -51,9 +54,16 @@ plumb.example.com {
 ```
 
 ```nginx
-location /api/v1/stream { proxy_pass http://127.0.0.1:8787; proxy_buffering off; proxy_read_timeout 1h; }
-location / { proxy_pass http://127.0.0.1:8787; }
+location = /api/v1/health/full { return 404; }
+location /api/v1/stream { proxy_pass http://127.0.0.1:8787; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_buffering off; proxy_read_timeout 1h; }
+location / { proxy_pass http://127.0.0.1:8787; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; }
 ```
+
+By default the app trusts `X-Forwarded-For` from loopback only. When the proxy reaches
+the app through the compose network (the published port, with the app off
+host networking), requests arrive from the network's gateway: name it in
+`TRUSTED_PROXIES` (`docker network inspect <project>_default`, the
+`Gateway` address), or every visitor shares one rate-limit bucket.
 
 **First start.**
 - The live loop starts at the node's finalized head.
@@ -154,7 +164,7 @@ step.
 | `TOPIC_BACKFILL_RPS` | `4` | `eth_getLogs` per second to each archive during the topic backfill (`0`: unpaced) |
 | `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DB` | `http://127.0.0.1:8123`, `default`, empty, `perpl` | Storage (set by compose) |
 | `ROLLUP_MS` | `60000` | Rollup interval |
-| `PORT`, `HOST` | `8787`, `0.0.0.0` | Listen address (use `127.0.0.1` behind a proxy outside Docker) |
+| `PORT`, `HOST` | `8787`, `127.0.0.1` | Listen address; the container image and compose set `HOST=0.0.0.0` inside the container |
 | `RPC_TIMEOUT_MS`, `RPC_MAX_BYTES` | `30000`, 64 MiB | Ingest RPC limits |
 | `POLL_MS`, `MIN_POLL_MS`, `VERIFY_BLOCKS`, `STALE_AFTER_MS`, `MAX_BLOCK_AGE_MS` | `2000`, `500`, `12000`, `45000`, `60000` | Contract-state collector: poll timer, minimum gap when a commit wakes it, rescan interval, staleness limits (`MAX_BLOCK_AGE_MS=0` disables the block-age check) |
 | `BOOK_LEVELS`, `BOOK_RANGE_BPS`, `BOOK_REFRESH_MS`, `BOOK_DISABLED` | `40`, `1500`, `30000`, `0` | Order-book walk |
@@ -164,7 +174,8 @@ step.
 | `REFERENCE_ENABLED` | `0` | `1` compares contract figures with Perpl's public API (never used for metrics) |
 | `LANDSCAPE_ENABLED`, `LANDSCAPE_URL` | `1`, DefiLlama open-interest overview | Market-share context on the overview; `0` makes no outbound call |
 | `RATE_LIMIT_PER_MIN`, `RATE_LIMIT_BURST` | `600`, `120` | Per-IP token bucket for `/api/` (`0` disables); CSV and `/compare` cost 10 |
-| `TRUST_PROXY` | `1` | Take the client from the last `X-Forwarded-For` entry when the peer is loopback (a proxy on the same host); `0` uses the peer address |
+| `TRUST_PROXY` | `1` | Take the client from the last `X-Forwarded-For` entry when the peer is loopback or in `TRUSTED_PROXIES`; `0` always uses the peer address |
+| `TRUSTED_PROXIES` | empty | Comma-separated proxy addresses or CIDR ranges (IPv4 or IPv6) trusted to name the client besides loopback, such as the compose network gateway (`docker network inspect plumb_default`, `IPAM.Config[0].Gateway`) when the proxy on the host reaches the app over the bridge. A malformed entry stops the start |
 
 ## Operating
 
@@ -176,7 +187,7 @@ is not an outage); a failed run mails the repository owner. With the
 `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` repository secrets set, the first
 failure and the recovery are also posted to that chat.
 
-- **Health**: `GET /api/v1/health` returns 200 with:
+- **Health**: `GET /api/v1/health` (public, states and counters only) returns 200 with:
   - `snapshot.status`: the collector (`fresh`, `syncing`, `stale` and a
     reason);
   - `index.live`: the last committed block and its age;
@@ -186,7 +197,9 @@ failure and the recovery are also posted to that chat.
   - `feeds`: which wake-up source is connected.
 
   The dashboard's status page (`/status`) shows the same, plus the
-  integrity check.
+  integrity check. `GET /api/v1/health/full` adds the error texts, ClickHouse
+  and alert counters and memory; the proxy keeps it to local callers, so read
+  it on the host: `curl -s localhost:8787/api/v1/health/full | jq`.
 - **Logs**: JSON lines on stdout. RPC URLs never appear in logs or
   responses.
 - **Restarts** are safe at any point:

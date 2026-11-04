@@ -6,6 +6,7 @@
 //
 // The bot long-polls getUpdates, so it needs no public endpoint. Subscriptions
 // are one JSON document in the kv table.
+import { createRateLimiter } from './ratelimit.js';
 
 const KINDS = ['open', 'increase', 'decrease', 'close', 'invert', 'liquidation', 'deleverage'];
 const EVENT = {
@@ -56,7 +57,7 @@ export const fmtPrice = v => { const n = Number(v); if (v === null || v === unde
 const assetOf = s => String(s ?? '').replace(/(\s+perp|[_-]v\d+)$/i, '').trim().toUpperCase();
 const isKey = t => /^(0x[0-9a-fA-F]{40}|\d{1,9})$/.test(t);
 
-export function createAlerts({ token, fetch: doFetch = globalThis.fetch, store, resolveAccount, tradeViews, accountState, fundingSeed = async () => [], symbolOf = id => `#${id}`, marketIds = () => [], site = 'https://plumb.huginn.tech', explorer = 'https://monadvision.com', log = () => {}, now = () => Date.now(), sendGapMs = 1100, maxChats = MAX_CHATS }) {
+export function createAlerts({ token, fetch: doFetch = globalThis.fetch, store, resolveAccount, tradeViews, accountState, fundingSeed = async () => [], symbolOf = id => `#${id}`, marketIds = () => [], site = 'https://plumb.huginn.tech', explorer = 'https://monadvision.com', log = () => {}, now = () => Date.now(), sendGapMs = 1100, maxChats = MAX_CHATS, updatesPerMinute = 20 }) {
   const api = `https://api.telegram.org/bot${token}`;
   // chat id (string) -> { wallets: { [accountId]: address }, liqs: { min, market } | null, trades: { min, market } | null, funding: bool, levels?: 'early' | 'standard' | 'late' }
   let subs = {};
@@ -64,11 +65,15 @@ export function createAlerts({ token, fetch: doFetch = globalThis.fetch, store, 
   const lastFundingSign = new Map(); // market -> -1 | 1
   const warned = new Map(); // `${chat}:${account}:${market}:${side}` -> lowest level warned
   const awaiting = new Map(); // chat -> 'watch' after the "Watch a wallet" button
-  const stats = { chats: 0, sent: 0, failed: 0, dropped: 0, commands: 0 };
+  const stats = { chats: 0, sent: 0, failed: 0, dropped: 0, commands: 0, throttled: 0 };
+  // Messages and button taps from one chat beyond this rate are ignored.
+  const throttle = createRateLimiter({ perMinute: updatesPerMinute, burst: updatesPerMinute, maxClients: 10000, now });
 
   // --- persistence -------------------------------------------------------------
   async function load() {
     try { const saved = await store.load(); if (saved) ({ subs = {}, offset = 0 } = saved); } catch (error) { log('warn', `alerts: load failed: ${error.message}`); }
+    // A saved warning preset that is not one of LEVELS falls back to the default.
+    for (const c of Object.values(subs)) if (c && c.levels !== undefined && !Object.hasOwn(LEVELS, c.levels)) { delete c.levels; dirty = true; }
     stats.chats = Object.keys(subs).length;
   }
   async function save() {
@@ -88,7 +93,7 @@ export function createAlerts({ token, fetch: doFetch = globalThis.fetch, store, 
   const forget = (chat, id = null) => { const prefix = id === null ? `${chat}:` : `${chat}:${id}:`; for (const key of [...warned.keys()]) if (key.startsWith(prefix)) warned.delete(key); };
   const drop = id => { if (subs[id]) { delete subs[id]; touch(); } forget(id); };
   const EMPTY = { wallets: {}, liqs: null, trades: null, funding: false };
-  const levelsOf = chat => LEVELS[subs[chat]?.levels] ?? LEVELS.standard;
+  const levelsOf = chat => (Object.hasOwn(LEVELS, subs[chat]?.levels ?? '') ? LEVELS[subs[chat].levels] : LEVELS.standard);
 
   // --- Telegram calls: one message at a time per chat, spaced for its limits ----
   const queues = new Map();
@@ -304,7 +309,7 @@ export function createAlerts({ token, fetch: doFetch = globalThis.fetch, store, 
       case 'pos': return [await positions(chat), 'Updated'];
       case 'levels': {
         if (!arg) return [levelsScreen(chat)];
-        if (!LEVELS[arg]) return [levelsScreen(chat)];
+        if (!Object.hasOwn(LEVELS, arg)) return [levelsScreen(chat)]; // never a key such as __proto__
         if (full(chat)) return [{ text: FULL, keyboard: [back] }];
         chatOf(chat).levels = arg; touch();
         return [menu(chat), LEVEL_NAMES[arg]];
@@ -408,37 +413,43 @@ export function createAlerts({ token, fetch: doFetch = globalThis.fetch, store, 
     for (const [id, chats] of byAccount) {
       let state;
       try { state = await accountState(Number(id)); } catch { continue; }
-      const live = new Set();
-      for (const p of state?.positions ?? []) {
-        const d = p.liquidation_distance_pct;
-        for (const chat of chats) {
-          const key = `${chat}:${id}:${p.market}:${p.side}`;
-          live.add(key);
-          if (d === null || d === undefined) continue;
-          const levels = levelsOf(chat);
-          if (d > levels[0] + 5) { warned.delete(key); continue; }
-          const level = levels.filter(x => d <= x).at(-1);
-          if (level === undefined || (warned.get(key) ?? Infinity) <= level) continue;
-          warned.set(key, level);
-          // Not awaited: each chat's queue keeps the order, and one slow chat does not hold up the rest.
-          // Sent without a time, so a busy queue never drops a warning.
-          send(chat, lines(`${level === levels.at(-1) ? '🚨' : '⚠️'} <b>${escHtml(assetOf(p.symbol))} ${escHtml(String(p.side).toLowerCase())} near liquidation</b>${tag(p.symbol)}`, row('Distance', `${d.toFixed(1)}%`), row('Mark → liq', `${fmtPrice(p.mark)} → ${fmtPrice(p.liquidation_price)}`), row('Position', usd(p.notional)), row('Wallet', walletLink(subs[chat]?.wallets[id], id))));
-        }
-      }
-      // A closed position clears its warning.
-      for (const key of [...warned.keys()]) if (key.split(':')[1] === id && !live.has(key)) warned.delete(key);
+      // One account's odd state never stops the warnings for the others.
+      try { warnPositions(id, chats, state); } catch (error) { log('warn', `alerts: risk check of account ${id} failed: ${error.message}`); }
     }
+  }
+  function warnPositions(id, chats, state) {
+    const live = new Set();
+    for (const p of state?.positions ?? []) {
+      const d = p.liquidation_distance_pct;
+      for (const chat of chats) {
+        const key = `${chat}:${id}:${p.market}:${p.side}`;
+        live.add(key);
+        if (d === null || d === undefined) continue;
+        const levels = levelsOf(chat);
+        if (d > levels[0] + 5) { warned.delete(key); continue; }
+        const level = levels.filter(x => d <= x).at(-1);
+        if (level === undefined || (warned.get(key) ?? Infinity) <= level) continue;
+        warned.set(key, level);
+        // Not awaited: each chat's queue keeps the order, and one slow chat does not hold up the rest.
+        // Sent without a time, so a busy queue never drops a warning.
+        send(chat, lines(`${level === levels.at(-1) ? '🚨' : '⚠️'} <b>${escHtml(assetOf(p.symbol))} ${escHtml(String(p.side).toLowerCase())} near liquidation</b>${tag(p.symbol)}`, row('Distance', `${d.toFixed(1)}%`), row('Mark → liq', `${fmtPrice(p.mark)} → ${fmtPrice(p.liquidation_price)}`), row('Position', usd(p.notional)), row('Wallet', walletLink(subs[chat]?.wallets[id], id))));
+      }
+    }
+    // A closed position clears its warning.
+    for (const key of [...warned.keys()]) if (key.split(':')[1] === id && !live.has(key)) warned.delete(key);
   }
 
   // --- polling loop --------------------------------------------------------------------
   async function pollOnce() {
     const updates = await call('getUpdates', { offset, timeout: 50, allowed_updates: ['message', 'callback_query'] });
     for (const u of updates) {
-      offset = Math.max(offset, u.update_id + 1); dirty = true;
+      // The offset alone is not saved: Telegram drops confirmed updates on the next poll.
+      offset = Math.max(offset, u.update_id + 1);
       try {
         if (u.callback_query) {
           const q = u.callback_query, chat = String(q.message?.chat?.id ?? '');
           if (!chat || q.message.chat.type !== 'private') continue;
+          if (!throttle.take(chat).ok) { stats.throttled++; continue; }
           const [screen, toast] = await press(chat, q.data);
           call('answerCallbackQuery', { callback_query_id: q.id, ...(toast ? { text: toast } : {}) }).catch(() => {});
           await edit(chat, q.message.message_id, screen);
@@ -447,6 +458,7 @@ export function createAlerts({ token, fetch: doFetch = globalThis.fetch, store, 
         const msg = u.message;
         if (!msg?.text || msg.chat?.type !== 'private') continue; // private chats only
         const chat = String(msg.chat.id);
+        if (!throttle.take(chat).ok) { stats.throttled++; continue; }
         send(chat, await handle(chat, msg.text));
       } catch (error) { log('warn', `alerts: update failed: ${error.message}`); }
     }

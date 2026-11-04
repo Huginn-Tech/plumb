@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRateLimiter, clientOf, costOf, rateLimitFromEnv } from '../src/ratelimit.js';
+import { createRateLimiter, clientOf, costOf, rateLimitFromEnv, parseTrustedProxies, proxyTrustFromEnv, createSlot } from '../src/ratelimit.js';
 
 const req = (peer, forwarded) => ({ socket: { remoteAddress: peer }, headers: forwarded ? { 'x-forwarded-for': forwarded } : {} });
 
@@ -44,4 +44,45 @@ test('the client table stays bounded', () => {
 test('configuration from the environment; zero disables', () => {
   assert.equal(rateLimitFromEnv({ RATE_LIMIT_PER_MIN: '0' }), null);
   assert.ok(rateLimitFromEnv({}));
+});
+
+test('TRUSTED_PROXIES names the proxies, such as the compose network gateway, that may name the client', () => {
+  const trust = proxyTrustFromEnv({ TRUSTED_PROXIES: '172.18.0.1, 10.20.0.0/16, fd00::/8' });
+  assert.equal(clientOf(req('172.18.0.1', '1.2.3.4, 5.6.7.8'), trust), '5.6.7.8', 'a named proxy');
+  assert.equal(clientOf(req('::ffff:172.18.0.1', '5.6.7.8'), trust), '5.6.7.8', 'the same proxy on a dual-stack socket');
+  assert.equal(clientOf(req('10.20.3.4', '5.6.7.8'), trust), '5.6.7.8', 'inside a named range');
+  assert.equal(clientOf(req('fd00::17', '5.6.7.8'), trust), '5.6.7.8', 'an IPv6 range');
+  assert.equal(clientOf(req('172.18.0.2', '5.6.7.8'), trust), '172.18.0.2', 'a neighbour of the proxy is not trusted');
+  assert.equal(clientOf(req('10.21.0.1', '5.6.7.8'), trust), '10.21.0.1');
+  assert.equal(clientOf(req('127.0.0.1', '5.6.7.8'), trust), '5.6.7.8', 'loopback stays trusted');
+  assert.equal(clientOf(req('172.18.0.1'), trust), '172.18.0.1', 'without the header the peer is the client');
+  assert.equal(clientOf(req('172.18.0.1', '5.6.7.8'), { ...trust, trustProxy: false }), '172.18.0.1', 'TRUST_PROXY=0 trusts nobody');
+  assert.equal(clientOf(req('172.18.0.1', '5.6.7.8')), '172.18.0.1', 'without the list only loopback is trusted');
+  const rl = rateLimitFromEnv({ RATE_LIMIT_PER_MIN: '60', RATE_LIMIT_BURST: '1', TRUSTED_PROXIES: '172.18.0.1' });
+  assert.ok(rl.check(req('172.18.0.1', '5.6.7.8'), '/api/v1/overview', new URLSearchParams()).ok);
+  assert.ok(rl.check(req('172.18.0.1', '9.9.9.9'), '/api/v1/overview', new URLSearchParams()).ok, 'clients behind the proxy have their own buckets');
+  assert.equal(rl.check(req('172.18.0.1', '5.6.7.8'), '/api/v1/overview', new URLSearchParams()).ok, false);
+});
+
+test('TRUSTED_PROXIES: empty means none, and a malformed entry stops the start', () => {
+  assert.equal(parseTrustedProxies(undefined), null);
+  assert.equal(parseTrustedProxies(' , '), null);
+  for (const bad of ['172.18.0.1/33', 'example.com', '172.18.0/24', '10.0.0.0/8/1', 'fd00::/129', '172.18.0.1/x']) {
+    assert.throws(() => parseTrustedProxies(bad), /INVALID_TRUSTED_PROXIES/, bad);
+  }
+});
+
+test('a slot lets one heavy job run at a time', () => {
+  const slot = createSlot();
+  const release = slot.enter();
+  assert.ok(release);
+  assert.equal(slot.busy, true);
+  assert.equal(slot.enter(), null, 'a second job is refused while the first runs');
+  release();
+  release(); // releasing twice frees it once
+  assert.equal(slot.busy, false);
+  const next = slot.enter();
+  assert.ok(next);
+  assert.equal(slot.enter(), null);
+  next();
 });

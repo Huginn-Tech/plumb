@@ -8,9 +8,27 @@ import { WINDOWS, BUCKETS, DEFAULT_BUCKET, EPOCH_WINDOWS, epochRange, epochStart
 import { walletAnalyzer, insights } from './analytics.js';
 import { metrics as computeMetrics } from './state.js';
 import { cohortTable } from './cohorts.js';
+import { createSlot } from './ratelimit.js';
 
 const bad = (message, status = 400) => Object.assign(new Error(message), { status });
+const busy = () => Object.assign(new Error('BUSY'), { status: 503, retryAfter: 5 });
 const HOUR = 3600, DAY = 86400, YEAR = 365 * DAY; // funding is annualised over 365 days
+// Paged lists (liquidations, leaderboard) start at most this far down.
+export const MAX_OFFSET = 5000;
+const LIQ_PAGES = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000], BOARD_PAGES = [10, 25, 50, 100, 200];
+const MISS_MS = 300000; // a key the contract does not know is not asked about again for 5 minutes
+const MAX_COMPARE = 5;
+const BALANCE_AT_KEEP = 256, BALANCE_AT_TTL_MS = 600000;
+
+// Any page (offset, limit) is read as an aligned page of a fixed size, the
+// smallest of `sizes` that holds `limit`, or two of them when it straddles a
+// page boundary, and sliced: requests share a few cached reads whatever
+// offsets and limits they ask for.
+export function pageWindow(offset, limit, sizes) {
+  const size = sizes.find(s => s >= limit) ?? limit;
+  const from = Math.floor(offset / size) * size, skip = offset - from;
+  return { size, from, skip, take: skip + limit <= size ? size : 2 * size };
+}
 
 // A value is served for ttlMs, then served stale while it is recomputed in the
 // background: up to twice ttlMs, or up to longStaleMs for values kept
@@ -66,6 +84,15 @@ export function createAnalyticsApi({ ch = null, ingest, rollups, queries, collec
   const price = (v, id) => { const x = meta(id); return x ? dec(v, x.priceDecimals) : null; };
   const size = (v, id) => { const x = meta(id); return x ? dec(v, x.lotDecimals) : null; };
   const unitsOf = id => ingest.unitsOf(Number(id));
+  // A market filter names a market the index or the contract knows; anything
+  // else is refused before it can key a cache entry or reach a query.
+  function marketParam(query) {
+    const raw = query.get('market');
+    if (raw === null || raw === '') return null;
+    const id = /^\d{1,5}$/.test(raw) ? Number(raw) : null;
+    if (id === null || (!ingest.markets.has(id) && !state.markets?.has(id))) throw bad('UNKNOWN_MARKET');
+    return id;
+  }
   const pctChange = (a, b) => (b === 0n ? null : Number((a - b) * 1000000n / (b < 0n ? -b : b)) / 10000);
   const share = (a, b) => (b > 0n ? Number(a * 1000000n / b) / 10000 : null);
 
@@ -130,10 +157,15 @@ export function createAnalyticsApi({ ch = null, ingest, rollups, queries, collec
       return { first: r?.first ? String(r.first) : null, last: r?.last ? String(r.last) : null };
     });
   }
+  // Backfill progress as responses carry it: states and counts, no error text.
+  function progress() {
+    const p = ingest.progress();
+    return p ? { ...p, failed: (p.failed ?? []).map(f => ({ from: f.from, to: f.to })), last_error: p.last_error ? { at: p.last_error.at ?? null } : null } : p;
+  }
   function coverageOf(from, to) {
     const cov = ingest.coverage;
     const complete = cov.spanCovered(from, to - 1);
-    return { complete, covered_since_deploy: cov.contiguousTs(), backfill: ingest.progress() };
+    return { complete, covered_since_deploy: cov.contiguousTs(), backfill: progress() };
   }
   function metaOf(extra = {}) {
     return { block: ingest.status.live.to?.toString() ?? null, ts: ingest.status.live.toTs, finalized_block: ingest.status.live.finalized?.toString() ?? null, generated_at: now(), ...extra };
@@ -300,7 +332,7 @@ export function createAnalyticsApi({ ch = null, ingest, rollups, queries, collec
   async function series(query) {
     const w = windowOf(query);
     const bucket = bucketOf(w, query);
-    const marketFilter = /^\d{1,5}$/.test(query.get('market') ?? '') ? Number(query.get('market')) : null;
+    const marketFilter = marketParam(query);
     return cache.get(`series:${w}:${bucket.name}:${marketFilter}`, w === '24h' ? 8000 : 15000, async () => {
       const range = rangeOf(w);
       // Buckets are labelled on the bucket grid, but the data starts at the window's
@@ -369,18 +401,19 @@ export function createAnalyticsApi({ ch = null, ingest, rollups, queries, collec
     return rows.map(r => tradeView(r, known));
   }
   async function liquidations(query) {
-    const limit = Math.min(Math.max(Number(query.get('limit')) || 100, 1), query.get('format') === 'csv' ? 10000 : 500);
-    const offset = Math.min(Math.max(Math.floor(Number(query.get('offset')) || 0), 0), 1000000);
-    const market = /^\d{1,5}$/.test(query.get('market') ?? '') ? Number(query.get('market')) : null;
+    const limit = Math.min(Math.max(Math.floor(Number(query.get('limit'))) || 100, 1), query.get('format') === 'csv' ? 10000 : 500);
+    const offset = Math.min(Math.max(Math.floor(Number(query.get('offset')) || 0), 0), MAX_OFFSET);
+    const market = marketParam(query);
     // With a window, the rows stay inside it (newest first, a page at `offset`),
     // with the window's total and its largest liquidation.
     const w = query.get('window') ? windowOf(query) : null;
     const sinceTs = w && w !== 'all' ? rangeOf(w).from : null;
+    const page = pageWindow(offset, limit, LIQ_PAGES);
     // The feed only changes when a liquidation lands, which drops it (liquidationsChanged).
-    return cache.get(`liq:${limit}:${offset}:${market}:${w}`, 60000, async () => {
+    const body = await cache.get(`liq:${page.from}:${page.take}:${market}:${w}`, 60000, async () => {
       const { from, to } = rangeOf('24h');
       const [rows, total, largest, dayRows] = await Promise.all([
-        queries.recent(['liquidation', 'deleverage'], { limit, offset, market, sinceTs }),
+        queries.recent(['liquidation', 'deleverage'], { limit: page.take, offset: page.from, market, sinceTs }),
         w ? queries.recentCount(['liquidation', 'deleverage'], { market, sinceTs }) : null,
         w ? queries.recent(['liquidation'], { limit: 1, market, sinceTs, order: 'size' }) : [],
         queries.marketTotals(from, to)
@@ -388,12 +421,14 @@ export function createAnalyticsApi({ ch = null, ingest, rollups, queries, collec
       const largestRow = largest[0] ?? null;
       const addr = await addresses([...new Set([...rows, ...largest].map(r => Number(r.account)))]);
       const day = sumMarkets(dayRows);
-      return { meta: metaOf(), last_24h: { count: day.liquidations, notional: dec(day.liquidated, cd()), deleverages: day.deleverages }, rows: rows.map(r => tradeView(r, addr)), ...(w ? { window: w, total, offset, largest: largestRow ? tradeView(largestRow, addr) : null } : {}) };
+      return { meta: metaOf(), last_24h: { count: day.liquidations, notional: dec(day.liquidated, cd()), deleverages: day.deleverages }, rows: rows.map(r => tradeView(r, addr)), ...(w ? { window: w, total, largest: largestRow ? tradeView(largestRow, addr) : null } : {}) };
     });
+    // The page asked for, out of the shared read; `offset` is the one served (capped at MAX_OFFSET).
+    return { ...body, rows: body.rows.slice(page.skip, page.skip + limit), ...(w ? { offset } : {}) };
   }
   async function trades(query) {
-    const limit = Math.min(Math.max(Number(query.get('limit')) || 50, 1), 200);
-    const market = /^\d{1,5}$/.test(query.get('market') ?? '') ? Number(query.get('market')) : null;
+    const limit = Math.min(Math.max(Math.floor(Number(query.get('limit'))) || 50, 1), 200);
+    const market = marketParam(query);
     return cache.get(`trades:${limit}:${market}`, 1000, async () => {
       const rows = await queries.recent(['open', 'increase', 'decrease', 'close', 'invert', 'liquidation'], { limit: limit * 2, market, sinceTs: headTs() - 7 * DAY });
       const takers = rows.filter(r => r.role === 'taker').slice(0, limit); // one row per aggressor
@@ -480,12 +515,13 @@ export function createAnalyticsApi({ ch = null, ingest, rollups, queries, collec
   async function leaderboard(query) {
     const w = windowOf(query, { epochs: true });
     const sort = query.get('by') || 'pnl';
-    const limit = Math.min(Math.max(Number(query.get('limit')) || 50, 1), 200);
-    const offset = Math.min(Math.max(Number(query.get('offset')) || 0, 0), 10000);
-    const market = /^\d{1,5}$/.test(query.get('market') ?? '') ? Number(query.get('market')) : null;
-    return cache.get(`lb:${windowKey(w)}:${sort}:${limit}:${offset}:${market}`, w === '24h' ? 5000 : 20000, async () => {
+    const limit = Math.min(Math.max(Math.floor(Number(query.get('limit'))) || 50, 1), 200);
+    const offset = Math.min(Math.max(Math.floor(Number(query.get('offset')) || 0), 0), MAX_OFFSET);
+    const market = marketParam(query);
+    const page = pageWindow(offset, limit, BOARD_PAGES);
+    const body = await cache.get(`lb:${windowKey(w)}:${sort}:${page.from}:${page.take}:${market}`, w === '24h' ? 5000 : 20000, async () => {
       const { from, to } = rangeOf(w);
-      const [{ total, rows }, xv, blocks] = await Promise.all([queries.accounts(from, to, { sort, limit, offset, market }), isEpoch(w) ? exchangeVolume(w).catch(() => null) : null, isEpoch(w) ? epochBlocks(w).catch(() => null) : null]);
+      const [{ total, rows }, xv, blocks] = await Promise.all([queries.accounts(from, to, { sort, limit: page.take, offset: page.from, market }), isEpoch(w) ? exchangeVolume(w).catch(() => null) : null, isEpoch(w) ? epochBlocks(w).catch(() => null) : null]);
       const addr = await addresses(rows.map(r => Number(r.account)));
       const c = cd();
       return {
@@ -493,15 +529,18 @@ export function createAnalyticsApi({ ch = null, ingest, rollups, queries, collec
         rows: rows.map(r => { const id = Number(r.account), open = openPositions(id); const vol = B(r.volume), net = B(r.realized) - B(r.fees); return { rank: Number(r.rank), account: id, address: addr.get(id)?.address ?? null, pnl: dec(net, c), realized: dec(r.realized, c), fees: dec(r.fees, c), volume: dec(vol, c), ...(xv ? { volume_share_pct: share(vol, xv) } : {}), maker_share_pct: share(B(r.maker_volume), vol), trades: Number(r.trades), roi_on_volume_bps: vol > 0n ? Number(net * 100000000n / vol) / 10000 : null, liquidations: Number(r.liquidations), liquidated: dec(r.liquidated, c), deposits: dec(r.deposits, c), withdrawals: dec(r.withdrawals, c), markets: (r.markets ?? []).map(Number).map(symbol), open_positions: open.count, open_notional: dec(open.notional, c), unrealized_pnl: dec(open.upnl, c) }; })
       };
     });
+    return { ...body, rows: body.rows.slice(page.skip, page.skip + limit) };
   }
 
   // --- wallets ------------------------------------------------------------------
-  // Keys the contract does not know are remembered briefly, so repeated
-  // lookups of a mistyped address cost no RPC call (indexed accounts are
-  // always checked first, so a new account is found as soon as it is ingested).
+  // Keys the contract does not know are remembered for MISS_MS, so repeated
+  // lookups of a mistyped (or made-up) address cost no RPC call (indexed
+  // accounts are always checked first, so a new account is found as soon as
+  // it is ingested).
   const misses = new Map();
   const knownMiss = key => { const until = misses.get(key); if (until > Date.now()) return true; misses.delete(key); return false; };
-  const notFound = key => { if (misses.size >= 10000) misses.delete(misses.keys().next().value); misses.set(key, Date.now() + 30000); return bad('ACCOUNT_NOT_FOUND', 404); };
+  const remember = key => { misses.delete(key); if (misses.size >= 10000) misses.delete(misses.keys().next().value); misses.set(key, Date.now() + MISS_MS); };
+  const notFound = key => { remember(key); return bad('ACCOUNT_NOT_FOUND', 404); };
   async function resolve(key) {
     const text = String(key).trim().toLowerCase();
     if (/^0x[0-9a-f]{40}$/.test(text)) {
@@ -526,8 +565,10 @@ export function createAnalyticsApi({ ch = null, ingest, rollups, queries, collec
     const q = String(query.get('q') ?? '').trim();
     if (q.length < 1 || q.length > 42) throw bad('INVALID_QUERY');
     let rows = (await queries.findAccounts(q, { limit: 8 })).map(r => ({ account: Number(r.account), address: r.address, created: Number(r.ts) }));
-    if (!rows.length && /^0x[0-9a-fA-F]{40}$/.test(q)) { const live = await accountByAddress(q.toLowerCase()); if (live) rows = [{ account: live.id, address: live.address, created: null }]; }
-    if (!rows.length && /^[1-9]\d{0,8}$/.test(q)) { const found = (await addresses([Number(q)])).get(Number(q)); if (found) rows = [{ account: Number(q), address: found.address, created: null }]; }
+    // A full address or id the index lacks is asked of the contract, under the same miss memory as wallet pages.
+    const key = q.toLowerCase();
+    if (!rows.length && /^0x[0-9a-f]{40}$/.test(key) && !knownMiss(key)) { const live = await accountByAddress(key); if (live) rows = [{ account: live.id, address: live.address, created: null }]; else remember(key); }
+    if (!rows.length && /^[1-9]\d{0,8}$/.test(key) && !knownMiss(key)) { const found = (await addresses([Number(key)])).get(Number(key)); if (found) rows = [{ account: Number(key), address: found.address, created: null }]; else remember(key); }
     return { meta: metaOf(), rows };
   }
 
@@ -545,7 +586,7 @@ export function createAnalyticsApi({ ch = null, ingest, rollups, queries, collec
       let cum = 0n;
       const addr = new Map([[acct.id, { address: acct.address }]]);
       return {
-        meta: metaOf({ coverage: { complete: ingest.coverage.contiguousTs() !== null, backfill: ingest.progress() } }),
+        meta: metaOf({ coverage: { complete: ingest.coverage.contiguousTs() !== null, backfill: progress() } }),
         account: { id: acct.id, address: acct.address, created: acct.created },
         summary: { volume: dec(sums.volume, c), trades: sums.trades, realized: dec(sums.realized, c), fees: dec(sums.fees, c), net_pnl: dec(sums.realized - sums.fees, c), funding: dec(sums.funding, c), liquidations: sums.liquidations, deposits: dec(sums.deposits, c), withdrawals: dec(sums.withdrawals, c), net_flow: dec(sums.deposits - sums.withdrawals, c), first_trade: firstTrade, last_trade: recentRows.length ? Number(recentRows[0].ts) : null, active_days: active.length, maker_share_pct: share(sums.maker, sums.volume), payouts_received: dec(transfers?.payouts ?? 0, c), payout_count: Number(transfers?.payout_count ?? 0), swept_to_protocol: dec(transfers?.sweeps ?? 0, c) },
         markets: marketRows.filter(r => Number(r.market) !== 0 && Number(r.trades) > 0).map(r => ({ market: Number(r.market), symbol: symbol(Number(r.market)), volume: dec(r.volume, c), trades: Number(r.trades), realized: dec(r.realized, c), fees: dec(r.fees, c), net_pnl: dec(B(r.realized) - B(r.fees), c), liquidations: Number(r.liquidations) })).sort((a, b) => Number(b.volume) - Number(a.volume)),
@@ -658,15 +699,15 @@ export function createAnalyticsApi({ ch = null, ingest, rollups, queries, collec
   }
 
   async function walletTrades(key, query) {
+    const market = marketParam(query);
     const acct = await resolve(key);
     const before = /^\d{1,12}:\d{1,9}$/.test(query.get('before') ?? '') ? query.get('before') : null;
-    const limit = Math.min(Math.max(Number(query.get('limit')) || 100, 1), query.get('format') === 'csv' ? 10000 : 500);
-    const market = /^\d{1,5}$/.test(query.get('market') ?? '') ? Number(query.get('market')) : null;
-    // An optional time range [from, to) in unix seconds (an epoch, say); as CSV it may hold up to 100,000 fills.
+    const limit = Math.min(Math.max(Math.floor(Number(query.get('limit'))) || 100, 1), query.get('format') === 'csv' ? 10000 : 500);
+    // An optional time range [from, to) in unix seconds (an epoch, say); as CSV it may hold up to 20,000 fills.
     const secs = k => (/^\d{9,10}$/.test(query.get(k) ?? '') ? Number(query.get(k)) : null);
     const from = secs('from'), to = secs('to'), ranged = from !== null && to !== null && to > from;
     const csvRange = ranged && query.get('format') === 'csv';
-    const rows = await queries.accountTrades(acct.id, { before, limit: csvRange ? Math.min(Math.max(Number(query.get('limit')) || 100000, 1), 100000) : limit, market, ...(ranged ? { from, to } : {}) });
+    const rows = await queries.accountTrades(acct.id, { before, limit: csvRange ? Math.min(Math.max(Math.floor(Number(query.get('limit'))) || 20000, 1), 20000) : limit, market, ...(ranged ? { from, to } : {}) });
     const addr = new Map([[acct.id, { address: acct.address }]]);
     const list = rows.map(r => tradeView(r, addr));
     return { meta: metaOf(), account: { id: acct.id, address: acct.address }, next: rows.length === limit ? `${rows.at(-1).block}:${rows.at(-1).log_index}` : null, rows: list };
@@ -674,7 +715,7 @@ export function createAnalyticsApi({ ch = null, ingest, rollups, queries, collec
 
   async function compare(query) {
     const keys = String(query.get('wallets') ?? '').split(',').map(s => s.trim()).filter(Boolean);
-    if (!keys.length || keys.length > 10) throw bad('INVALID_WALLETS');
+    if (!keys.length || keys.length > MAX_COMPARE) throw bad('INVALID_WALLETS');
     const out = await Promise.all(keys.map(k => Promise.all([profile(k), walletAnalytics(k)]).then(([p, a]) => ({ key: k, ...p, performance: a.performance })).catch(error => ({ key: k, error: error.status ? error.message : 'UNAVAILABLE' }))));
     return { meta: metaOf(), wallets: out };
   }
@@ -713,6 +754,11 @@ export function createAnalyticsApi({ ch = null, ingest, rollups, queries, collec
   }
   // The same comparison at any indexed block, with the contract read at that
   // block (node or archive): finds when a difference appeared.
+  // Each block's answer is kept (BALANCE_AT_KEEP blocks, BALANCE_AT_TTL_MS),
+  // and one is computed at a time: a computation sums the index up to the
+  // block and reads the contract there, from an archive for old blocks.
+  const balanceAt = new Map(); // block -> { at, value }
+  const balanceAtSlot = createSlot();
   async function protocolBalanceAt(key) {
     if (!/^\d{1,12}$/.test(String(key ?? ''))) throw bad('INVALID_BLOCK');
     const block = BigInt(key);
@@ -720,9 +766,19 @@ export function createAnalyticsApi({ ch = null, ingest, rollups, queries, collec
     if (block < ingest.coverage.intervals[0]?.from || top === null || block > top) throw bad('BLOCK_NOT_INDEXED');
     const scan = ingest.topicProgress?.();
     if (!scan?.complete) return { status: 'pending', scanned_pct: scan?.pct ?? null };
-    const [ts, contract] = await Promise.all([queries.tsAtBlock(block), ingest.protocolBalanceAt(block)]);
-    if (ts === null) throw bad('BLOCK_NOT_INDEXED');
-    return balanceAgainst(block, ts, contract);
+    const k = block.toString(), hit = balanceAt.get(k);
+    if (hit && now() - hit.at < BALANCE_AT_TTL_MS) return hit.value;
+    const release = balanceAtSlot.enter();
+    if (!release) throw busy();
+    try {
+      const [ts, contract] = await Promise.all([queries.tsAtBlock(block), ingest.protocolBalanceAt(block)]);
+      if (ts === null) throw bad('BLOCK_NOT_INDEXED');
+      const value = await balanceAgainst(block, ts, contract);
+      balanceAt.delete(k);
+      if (balanceAt.size >= BALANCE_AT_KEEP) balanceAt.delete(balanceAt.keys().next().value);
+      balanceAt.set(k, { at: now(), value });
+      return value;
+    } finally { release(); }
   }
   async function balanceAgainst(block, blockTs, contract) {
     const c = cd();

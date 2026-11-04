@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { roundTrips, performance, insights, walletAnalyzer } from '../src/analytics.js';
 import { tradeHistory } from './helpers/trade-history.js';
-import { createCache, createAnalyticsApi } from '../src/analytics-api.js';
+import { createCache, createAnalyticsApi, pageWindow, MAX_OFFSET } from '../src/analytics-api.js';
 import { createQueries } from '../src/query.js';
 import { createCollector, collectorOptions } from '../src/collector.js';
 import { createFakeExchange, EXCHANGE } from './helpers/fake-exchange.js';
@@ -16,14 +16,15 @@ const row = (kind, market, side, o = {}) => ({ kind, market, side, role: 'taker'
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
 
 // An analytics API over fake queries and an in-memory collector state.
-function analyticsWith(queries, { state = { block: null, markets: new Map(), exchangeInfo: null, stats: {} }, clock = { t: 1790005000000 }, options = {} } = {}) {
+function analyticsWith(queries, { state = { block: null, markets: new Map(), exchangeInfo: null, stats: {} }, clock = { t: 1790005000000 }, options = {}, ingestWith = {} } = {}) {
   const ingest = {
     collateralDecimals: 6,
     markets: new Map([[1, { symbol: 'BTC', name: 'BTC', priceDecimals: 1, lotDecimals: 5 }], [20, { symbol: 'ETH', name: 'ETH', priceDecimals: 1, lotDecimals: 5 }]]),
     unitsOf: () => null,
     status: { live: { to: 5000n, toTs: 1790005000, finalized: null } },
     coverage: { intervals: [{ from: 0n, to: 5000n, fromTs: 1789000000, toTs: 1790005000 }], spanCovered: () => true, contiguousTs: () => 1790005000 },
-    progress: () => ({ complete: true })
+    progress: () => ({ complete: true }),
+    ...ingestWith
   };
   const findAccounts = async text => [{ account: Number(text), address: '0x' + Number(text).toString(16).padStart(40, '0'), ts: 1789000000 }];
   return createAnalyticsApi({ ingest, rollups: {}, queries: { findAccounts, balanceMoves: async () => [], accountTransfers: async () => null, ...queries }, collector: { state, reader: {} }, now: () => clock.t, ...options });
@@ -421,4 +422,92 @@ test('new traders: no rolled-up hour straddles the window start', async () => {
   assert.ok(sql.includes(range('ts', 3600, 5400)) && sql.includes(range('ts', 5400, 7200)), sql);
   assert.ok(!sql.includes(range('hour', 0, 14400)) && !sql.includes(range('hour', 3600, 7200)), sql);
   assert.match(sql, /WHERE first >= toDateTime\(5400, 'UTC'\) AND first < toDateTime\(14400, 'UTC'\)/);
+});
+
+test('page windows: any offset and limit is read as an aligned page of a fixed size', () => {
+  const sizes = [10, 25, 50];
+  assert.deepEqual(pageWindow(0, 10, sizes), { size: 10, from: 0, skip: 0, take: 10 });
+  assert.deepEqual(pageWindow(7, 3, sizes), { size: 10, from: 0, skip: 7, take: 10 });
+  assert.deepEqual(pageWindow(8, 5, sizes), { size: 10, from: 0, skip: 8, take: 20 }, 'across a page boundary: two pages');
+  assert.deepEqual(pageWindow(37, 20, sizes), { size: 25, from: 25, skip: 12, take: 50 });
+  assert.deepEqual(pageWindow(5000, 50, sizes), { size: 50, from: 5000, skip: 0, take: 50 });
+  for (let offset = 0; offset < 300; offset += 7) for (const limit of [1, 9, 10, 11, 24, 50]) {
+    const p = pageWindow(offset, limit, sizes);
+    assert.ok(p.from <= offset && offset + limit <= p.from + p.take && p.from % p.size === 0, `${offset}+${limit}`);
+  }
+});
+
+test('leaderboard pages: offsets are capped and pages are cut from a few shared reads', async () => {
+  const asked = [];
+  const all = Array.from({ length: 6000 }, (_, i) => ({ account: i + 1, rank: String(i + 1) }));
+  const api = analyticsWith({ accounts: async (from, to, { limit, offset }) => { asked.push([offset, limit]); return { total: all.length, rows: all.slice(offset, offset + limit) }; }, addresses: async () => new Map() });
+  const ranks = async q => (await api.leaderboard(new URLSearchParams(q))).rows.map(r => r.rank);
+  assert.deepEqual(await ranks('limit=3&offset=7'), [8, 9, 10]);
+  assert.deepEqual(asked.at(-1), [0, 10], 'read as the first page of ten');
+  assert.deepEqual(await ranks('limit=2&offset=3'), [4, 5]);
+  assert.equal(asked.length, 1, 'another slice of the same page is served from the cached read');
+  assert.deepEqual(await ranks('limit=5&offset=8'), [9, 10, 11, 12, 13]);
+  assert.deepEqual(asked.at(-1), [0, 20], 'a slice across a boundary reads two pages');
+  const page = await api.leaderboard(new URLSearchParams('limit=50&offset=120'));
+  assert.equal(page.rows.length, 50);
+  assert.equal(page.rows[0].rank, 121);
+  assert.deepEqual(asked.at(-1), [100, 100]);
+  const deep = await api.leaderboard(new URLSearchParams('limit=10&offset=999999'));
+  assert.equal(deep.rows[0].rank, MAX_OFFSET + 1, 'an offset past the cap starts at the cap');
+  assert.deepEqual(asked.at(-1), [MAX_OFFSET, 10]);
+  assert.equal((await api.leaderboard(new URLSearchParams('limit=100000'))).rows.length, 200, 'the limit stays capped');
+});
+
+test('liquidation pages: a capped offset, a page read from an aligned window', async () => {
+  const asked = [];
+  const rows = Array.from({ length: 12000 }, (_, i) => ({ kind: 'liquidation', role: 'none', market: 1, account: i + 1, side: 0, block: 100000 - i, log_index: 0, ts: 1790000000 - i, lot: 0n, notional: 0n, price: 0n, fee: 0n, pnl: 0n }));
+  const api = analyticsWith({
+    recent: async (kinds, { limit, offset = 0 }) => { asked.push([offset, limit]); return rows.slice(offset, offset + limit); },
+    recentCount: async () => rows.length, marketTotals: async () => [], addresses: async () => new Map()
+  });
+  const accounts = async q => (await api.liquidations(new URLSearchParams(q))).rows.map(r => r.account);
+  assert.deepEqual(await accounts('limit=3&offset=24'), [25, 26, 27]);
+  assert.deepEqual(asked.at(-1), [20, 10], 'read as the third page of ten');
+  const capped = await api.liquidations(new URLSearchParams('window=7d&limit=10&offset=50000000'));
+  assert.equal(capped.offset, MAX_OFFSET, 'the offset served is the capped one');
+  assert.equal(capped.rows[0].account, MAX_OFFSET + 1);
+  assert.ok(asked.every(([offset, limit]) => offset <= MAX_OFFSET && limit <= 20000));
+});
+
+test('a market filter must name a known market; nothing is read or cached otherwise', async () => {
+  const asked = [];
+  const state = { block: null, markets: new Map([[30, {}]]), exchangeInfo: null, stats: {} };
+  const api = analyticsWith({ accounts: async (from, to, opts) => { asked.push(opts.market); return { total: 0, rows: [] }; }, addresses: async () => new Map() }, { state });
+  for (const market of ['99', 'abc', '1e3', '-1', '__proto__', '123456', '1.5']) {
+    await assert.rejects(api.leaderboard(new URLSearchParams(`market=${market}`)), { status: 400, message: 'UNKNOWN_MARKET' }, market);
+  }
+  assert.deepEqual(asked, []);
+  await api.leaderboard(new URLSearchParams('market=20'));
+  await api.leaderboard(new URLSearchParams('market=30'));
+  await api.leaderboard(new URLSearchParams('market='));
+  assert.deepEqual(asked, [20, 30, null], 'indexed markets, contract markets, and no filter');
+});
+
+test('compare takes at most five wallets', async () => {
+  const api = analyticsWith({});
+  await assert.rejects(api.compare(new URLSearchParams('wallets=1,2,3,4,5,6')), { status: 400, message: 'INVALID_WALLETS' });
+  await assert.rejects(api.compare(new URLSearchParams('wallets=')), { status: 400, message: 'INVALID_WALLETS' });
+});
+
+test('protocol balance at a past block: one computation at a time, each answer kept', async () => {
+  let open, reads = 0;
+  const gate = new Promise(resolve => { open = resolve; });
+  const api = analyticsWith(
+    { tsAtBlock: async () => 1789500000, revenueUpTo: async () => ({}), balanceMovesAtBlock: async () => [], unsplitAtBlock: async () => null },
+    { ingestWith: { topicProgress: () => ({ complete: true }), protocolBalanceAt: async () => { reads++; await gate; return 0n; } } }
+  );
+  const first = api.protocolBalanceAt('100');
+  await assert.rejects(api.protocolBalanceAt('200'), { status: 503, message: 'BUSY' });
+  open();
+  assert.equal((await first).status, 'match');
+  assert.equal((await api.protocolBalanceAt('100')).block, '100');
+  assert.equal(reads, 1, 'the kept answer is served');
+  assert.equal((await api.protocolBalanceAt('200')).block, '200');
+  assert.equal(reads, 2, 'the slot is free again');
+  await assert.rejects(api.protocolBalanceAt('9999999'), { status: 400, message: 'BLOCK_NOT_INDEXED' });
 });
