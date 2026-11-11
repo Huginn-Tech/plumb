@@ -5,7 +5,7 @@
 **[plumb.huginn.tech](https://plumb.huginn.tech)** · [API](docs/api.md) ·
 [Features](docs/features.md) · [Methodology](docs/methodology.md)
 
-[![ci](https://github.com/s0urledd/plumb/actions/workflows/ci.yml/badge.svg)](https://github.com/s0urledd/plumb/actions/workflows/ci.yml)
+[![ci](https://github.com/Huginn-Tech/plumb/actions/workflows/ci.yml/badge.svg)](https://github.com/Huginn-Tech/plumb/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ![Plumb overview](docs/images/overview.png)
@@ -144,7 +144,7 @@ More in [docs/architecture.md](docs/architecture.md).
 Needs Docker with Compose v2, and about 6 GB of disk for the full history.
 
 ```bash
-git clone https://github.com/s0urledd/plumb && cd plumb
+git clone https://github.com/Huginn-Tech/plumb && cd plumb
 cp .env.example .env          # MONAD_RPC_URL, ARCHIVE_RPC_URLS, CLICKHOUSE_PASSWORD
 docker compose up -d --build  # app + ClickHouse, then open http://127.0.0.1:8787
 docker compose --profile exec-events up -d --build   # optional, with the node's event ring
