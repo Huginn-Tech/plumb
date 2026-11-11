@@ -29,7 +29,7 @@ to WebSocket heads or polling.
 ## Deploy
 
 ```bash
-git clone https://github.com/s0urledd/plumb && cd plumb
+git clone https://github.com/Huginn-Tech/plumb && cd plumb
 cp .env.example .env
 #   MONAD_RPC_URL=http://host.docker.internal:8080   (the node, seen from a container)
 #   ARCHIVE_RPC_URLS=https://rpc1.monad.xyz,https://rpc2.monad.xyz
